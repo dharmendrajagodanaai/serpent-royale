@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SERPENT ROYALE</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+    #canvas-container { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    /* HUD */
+    #hud {
+      position: fixed; inset: 0; pointer-events: none;
+      display: none;
+    }
+
+    #kill-feed {
+      position: absolute; top: 80px; right: 16px;
+      display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+      max-width: 280px;
+    }
+    .kill-entry {
+      background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.15);
+      padding: 4px 10px; border-radius: 4px;
+      font-size: 12px; color: #fff;
+      animation: fadeKill 3s forwards;
+    }
+    @keyframes fadeKill { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+
+    #minimap-container {
+      position: absolute; bottom: 20px; right: 20px;
+      width: 160px; height: 160px;
+      border: 2px solid rgba(0,200,255,0.5);
+      border-radius: 50%;
+      overflow: hidden;
+      background: rgba(0,0,0,0.6);
+    }
+    #minimap { width: 100%; height: 100%; }
+
+    #stats {
+      position: absolute; top: 16px; left: 16px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .stat-box {
+      background: rgba(0,0,0,0.6); border: 1px solid rgba(0,200,255,0.3);
+      padding: 6px 14px; border-radius: 6px;
+      font-size: 14px; color: #00ccff;
+      text-shadow: 0 0 8px #00ccff;
+    }
+    .stat-label { font-size: 10px; color: rgba(0,200,255,0.6); margin-bottom: 2px; }
+    .stat-value { font-size: 18px; font-weight: bold; }
+
+    #zone-info {
+      position: absolute; top: 16px; right: 16px;
+      background: rgba(0,0,0,0.6); border: 1px solid rgba(255,80,80,0.4);
+      padding: 6px 14px; border-radius: 6px;
+      font-size: 14px; color: #ff5050;
+      text-shadow: 0 0 8px #ff5050;
+      text-align: center;
+    }
+    .zone-label { font-size: 10px; color: rgba(255,80,80,0.7); }
+    .zone-timer { font-size: 22px; font-weight: bold; }
+
+    #boost-bar-container {
+      position: absolute; bottom: 20px; left: 20px;
+      width: 200px;
+    }
+    .bar-label { font-size: 11px; color: rgba(0,255,150,0.8); margin-bottom: 4px; }
+    #boost-bar-bg {
+      width: 100%; height: 8px;
+      background: rgba(0,0,0,0.5); border: 1px solid rgba(0,255,150,0.3);
+      border-radius: 4px; overflow: hidden;
+    }
+    #boost-bar {
+      height: 100%; background: linear-gradient(90deg, #00ff96, #00ffcc);
+      border-radius: 4px; transition: width 0.1s;
+      box-shadow: 0 0 6px #00ff96;
+    }
+
+    #crosshair {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 10px; height: 10px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-radius: 50%;
+    }
+
+    #damage-overlay {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(255,0,0,0.3) 100%);
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.1s;
+    }
+
+    /* Start Screen */
+    #start-screen {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, #0a0a1a 0%, #000005 100%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 20px; z-index: 100;
+    }
+    .game-title {
+      font-size: 72px; font-weight: bold;
+      color: #00ffcc;
+      text-shadow: 0 0 30px #00ffcc, 0 0 60px #00ff88;
+      letter-spacing: 8px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100% { text-shadow: 0 0 30px #00ffcc, 0 0 60px #00ff88; }
+      50% { text-shadow: 0 0 50px #00ffcc, 0 0 100px #00ff88, 0 0 150px #00ffaa; }
+    }
+    .game-subtitle {
+      font-size: 18px; color: rgba(0,200,255,0.7);
+      letter-spacing: 4px; text-transform: uppercase;
+    }
+    .start-controls {
+      margin-top: 20px;
+      background: rgba(0,255,200,0.05); border: 1px solid rgba(0,255,200,0.2);
+      padding: 20px 40px; border-radius: 12px;
+      display: grid; grid-template-columns: auto auto; gap: 8px 24px;
+      font-size: 13px; color: rgba(200,255,255,0.7);
+    }
+    .ctrl-key { color: #00ffcc; font-weight: bold; }
+    #play-btn {
+      margin-top: 10px;
+      padding: 16px 60px; font-size: 22px; font-weight: bold;
+      background: linear-gradient(135deg, #00ffcc, #00aaff);
+      color: #000; border: none; border-radius: 8px;
+      cursor: pointer; pointer-events: all;
+      letter-spacing: 4px; text-transform: uppercase;
+      box-shadow: 0 0 30px rgba(0,255,200,0.4);
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    #play-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 50px rgba(0,255,200,0.6);
+    }
+
+    /* Countdown */
+    #countdown-screen {
+      position: fixed; inset: 0;
+      display: none; align-items: center; justify-content: center;
+      z-index: 90; pointer-events: none;
+    }
+    #countdown-num {
+      font-size: 160px; font-weight: bold;
+      color: #00ffcc;
+      text-shadow: 0 0 40px #00ffcc, 0 0 80px #00ff88;
+      animation: countPulse 0.9s ease-out;
+    }
+    @keyframes countPulse {
+      0% { transform: scale(1.5); opacity: 0; }
+      50% { opacity: 1; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Results Screen */
+    #results-screen {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: none; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px; z-index: 100;
+    }
+    #results-title {
+      font-size: 56px; font-weight: bold; letter-spacing: 6px;
+    }
+    #results-stats {
+      background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2);
+      padding: 20px 40px; border-radius: 10px;
+      font-size: 16px; line-height: 2;
+      text-align: center; color: rgba(255,255,255,0.8);
+    }
+    #play-again-btn {
+      margin-top: 10px;
+      padding: 14px 50px; font-size: 18px; font-weight: bold;
+      background: linear-gradient(135deg, #00ffcc, #00aaff);
+      color: #000; border: none; border-radius: 8px;
+      cursor: pointer; pointer-events: all;
+      letter-spacing: 4px; text-transform: uppercase;
+      box-shadow: 0 0 20px rgba(0,255,200,0.4);
+    }
+    #play-again-btn:hover { box-shadow: 0 0 40px rgba(0,255,200,0.6); }
+
+    /* Alive banner */
+    #alive-banner {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      font-size: 28px; font-weight: bold; color: #fff;
+      text-shadow: 0 0 20px currentColor;
+      pointer-events: none;
+      opacity: 0; transition: opacity 0.3s;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <!-- Start Screen -->
+  <div id="start-screen">
+    <div class="game-title">SERPENT ROYALE</div>
+    <div class="game-subtitle">3D Snake Battle Royale</div>
+    <div class="start-controls">
+      <span class="ctrl-key">MOUSE</span><span>Steer serpent</span>
+      <span class="ctrl-key">W / CLICK</span><span>Speed boost (drains length)</span>
+      <span class="ctrl-key">SPACE</span><span>U-turn</span>
+      <span class="ctrl-key">TAB</span><span>Scoreboard</span>
+    </div>
+    <button id="play-btn">PLAY</button>
+  </div>
+
+  <!-- Countdown -->
+  <div id="countdown-screen">
+    <div id="countdown-num">3</div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="stats">
+      <div class="stat-box">
+        <div class="stat-label">LENGTH</div>
+        <div class="stat-value" id="stat-length">5</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">ALIVE</div>
+        <div class="stat-value" id="stat-alive">8</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">KILLS</div>
+        <div class="stat-value" id="stat-kills">0</div>
+      </div>
+    </div>
+
+    <div id="zone-info">
+      <div class="zone-label">ZONE CLOSES IN</div>
+      <div class="zone-timer" id="zone-timer">0:30</div>
+    </div>
+
+    <div id="kill-feed"></div>
+
+    <div id="minimap-container">
+      <canvas id="minimap" width="160" height="160"></canvas>
+    </div>
+
+    <div id="boost-bar-container">
+      <div class="bar-label">LENGTH (BOOST FUEL)</div>
+      <div id="boost-bar-bg"><div id="boost-bar" style="width:100%"></div></div>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="damage-overlay"></div>
+    <div id="alive-banner"></div>
+  </div>
+
+  <!-- Results Screen -->
+  <div id="results-screen">
+    <div id="results-title">VICTORY</div>
+    <div id="results-stats"></div>
+    <button id="play-again-btn">PLAY AGAIN</button>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

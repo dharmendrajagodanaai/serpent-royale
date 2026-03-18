@@ -1,0 +1,17 @@
+{
+  "name": "serpent-royale",
+  "version": "1.0.0",
+  "description": "3D Snake Battle Royale",
+  "type": "module",
+  "scripts": {
+    "dev": "vite client",
+    "build": "vite build client",
+    "preview": "vite preview client"
+  },
+  "dependencies": {
+    "three": "^0.162.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
