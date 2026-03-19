@@ -4,7 +4,22 @@ import { getTerrainHeight } from './terrain.js';
 const MAX_ORBS = 500;
 const ORBS_AT_START = 60;
 const ORB_COLLECT_DIST = 1.4;
+const ORB_COLLECT_DIST_BOOST = 1.9; // wider sweep when boosting at speed
 const ORB_RADIUS = 0.22;
+
+// Returns squared distance from point (px,pz) to segment (ax,az)→(bx,bz)
+function pointToSegDistSq(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const lenSq = dx * dx + dz * dz;
+  if (lenSq < 0.0001) {
+    const ex = px - ax, ez = pz - az;
+    return ex * ex + ez * ez;
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / lenSq));
+  const cx = ax + t * dx, cz = az + t * dz;
+  const ex = px - cx, ez = pz - cz;
+  return ex * ex + ez * ez;
+}
 
 export class OrbManager {
   constructor(scene) {
@@ -61,6 +76,16 @@ export class OrbManager {
     return idx;
   }
 
+  // Drop a boost orb at a given position (called when snake drains length while boosting)
+  spawnBoostOrb(x, z) {
+    const spread = 0.4;
+    this._addOrb(
+      x + (Math.random() - 0.5) * spread,
+      z + (Math.random() - 0.5) * spread,
+      0xffaa22  // golden-orange color to distinguish from normal orbs
+    );
+  }
+
   // Called when a serpent dies — scatter segments as orbs
   scatter(serpent) {
     const segs = serpent.path.segmentPositions;
@@ -77,17 +102,23 @@ export class OrbManager {
     while (this.orbs.length > MAX_ORBS) this.orbs.shift();
   }
 
-  // Returns array of serpent indices that collected orbs this frame
+  // Swept-sphere orb collection — checks movement segment to avoid tunneling at high speed
   checkCollection(serpents) {
     const events = [];
     for (const s of serpents) {
       if (!s.alive) continue;
+      const collectDist = s.boosting ? ORB_COLLECT_DIST_BOOST : ORB_COLLECT_DIST;
+      const distSq = collectDist * collectDist;
+      // Previous head position for sweep (falls back to current pos on first frame)
+      const prevX = s.prevHeadX ?? s.headPos.x;
+      const prevZ = s.prevHeadZ ?? s.headPos.z;
+
       for (let i = this.orbs.length - 1; i >= 0; i--) {
         const orb = this.orbs[i];
         if (!orb.alive) continue;
-        const dx = s.headPos.x - orb.x;
-        const dz = s.headPos.z - orb.z;
-        if (dx * dx + dz * dz < ORB_COLLECT_DIST * ORB_COLLECT_DIST) {
+        // Swept check: distance from orb center to head movement segment
+        const d2 = pointToSegDistSq(orb.x, orb.z, prevX, prevZ, s.headPos.x, s.headPos.z);
+        if (d2 < distSq) {
           orb.alive = false;
           events.push({ serpent: s, orbColor: orb.color });
           // Respawn a new orb

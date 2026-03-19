@@ -135,6 +135,48 @@ export function updateMinimap(serpentManager, zoneManager) {
   ctx.restore();
 }
 
+// ─── Leaderboard ─────────────────────────────────────────────────────────────
+
+export function updateLeaderboard(serpentManager) {
+  const el = document.getElementById('lb-entries');
+  if (!el) return;
+
+  // Sort alive serpents by segment count descending, then dead ones
+  const alive = serpentManager.serpents
+    .filter(s => s.alive)
+    .sort((a, b) => b.segmentCount - a.segmentCount);
+
+  const top5 = alive.slice(0, 5);
+  const playerInTop5 = top5.some(s => s.isPlayer);
+
+  // If player is alive but not in top 5, append them
+  const player = serpentManager.playerSerpent;
+  const showExtra = player && player.alive && !playerInTop5;
+
+  let html = '';
+  top5.forEach((s, rank) => {
+    const col = '#' + s.color.getHexString();
+    const cls = s.isPlayer ? ' lb-player' : '';
+    html += `<div class="lb-entry${cls}">
+      <span class="lb-rank">${rank + 1}</span>
+      <span class="lb-name" style="color:${col}">${s.name}</span>
+      <span class="lb-len">${s.segmentCount}</span>
+    </div>`;
+  });
+
+  if (showExtra) {
+    const rank = alive.indexOf(player) + 1;
+    const col = '#' + player.color.getHexString();
+    html += `<div class="lb-entry lb-player lb-sep">
+      <span class="lb-rank">${rank}</span>
+      <span class="lb-name" style="color:${col}">${player.name}</span>
+      <span class="lb-len">${player.segmentCount}</span>
+    </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
 // ─── Screens ─────────────────────────────────────────────────────────────────
 
 export function showHUD(show) {
