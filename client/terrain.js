@@ -117,14 +117,14 @@ export class Terrain {
           vec2 b = mod(p - h, r) - h;
           vec2 gv = dot(a,a) < dot(b,b) ? a : b;
           float d = hexDist(gv);
-          float edge = 1.0 - smoothstep(0.43, 0.47, d);
+          float edge = 1.0 - smoothstep(0.44, 0.47, d);
           return vec4(gv, d, edge);
         }
 
         void main() {
           // Hex grid overlay
           vec4 hx = hexGrid(vWorldPos.xz, 0.3);
-          float grid = hx.w * 0.25;
+          float grid = hx.w * 0.42;
 
           // Subtle animated pulse along grid edges
           float pulse = sin(time * 0.8 + length(vWorldPos.xz) * 0.05) * 0.5 + 0.5;
@@ -135,7 +135,7 @@ export class Terrain {
 
           // Arena boundary indicator (soft red ring at zone edge - handled in zone.js)
           vec3 baseCol = vColor * (diff + 0.1);
-          vec3 gridCol = vec3(0.0, 0.4, 0.6) * grid * pulse;
+          vec3 gridCol = vec3(0.0, 0.5, 0.7) * grid * (0.6 + pulse * 0.4);
 
           gl_FragColor = vec4(baseCol + gridCol, 1.0);
         }

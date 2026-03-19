@@ -133,6 +133,7 @@ export class TrailSystem {
     this.scene = scene;
     this.trails = [];
     this.maxPoints = pointsPerTrail;
+    this._glowColor = new THREE.Color();
 
     for (let i = 0; i < maxTrails; i++) {
       const pts = [];
@@ -165,8 +166,15 @@ export class TrailSystem {
       }
 
       trail.line.visible = true;
-      trail.line.material.color.set(s.color);
-      trail.line.material.opacity = s.boosting ? 0.5 : 0.2;
+      if (s.boosting) {
+        // Brighter glow trail when boosting
+        this._glowColor.copy(s.color).lerp(new THREE.Color(1, 1, 1), 0.45);
+        trail.line.material.color.set(this._glowColor);
+        trail.line.material.opacity = 0.82;
+      } else {
+        trail.line.material.color.set(s.color);
+        trail.line.material.opacity = 0.2;
+      }
       used.add(idx);
 
       // Fill trail points from path

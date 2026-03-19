@@ -96,7 +96,7 @@
       position: absolute; inset: 0;
       background: radial-gradient(ellipse at center, transparent 28%, rgba(255,0,0,0.65) 100%);
       opacity: 0; pointer-events: none;
-      transition: opacity 0.05s;
+      transition: opacity 0.2s ease-out;
     }
 
     /* Killed-by overlay shown briefly after player dies */
@@ -224,6 +224,42 @@
       pointer-events: none;
       opacity: 0; transition: opacity 0.3s;
     }
+
+    /* YOUR SCORE — top center */
+    #your-score {
+      position: absolute; top: 16px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(0,255,200,0.35);
+      padding: 5px 22px; border-radius: 8px;
+      text-align: center; pointer-events: none;
+    }
+    #score-label { font-size: 10px; color: rgba(0,255,200,0.65); letter-spacing: 3px; text-transform: uppercase; }
+    #score-value { font-size: 26px; font-weight: bold; color: #00ffcc; text-shadow: 0 0 14px #00ffcc; }
+
+    /* Leaderboard */
+    #leaderboard-panel {
+      position: absolute; bottom: 200px; right: 20px;
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(0,200,255,0.25);
+      padding: 8px 12px; border-radius: 8px;
+      min-width: 180px; pointer-events: none;
+    }
+    .lb-title {
+      font-size: 10px; color: rgba(0,200,255,0.65);
+      letter-spacing: 3px; text-transform: uppercase;
+      text-align: center; margin-bottom: 6px;
+    }
+    .lb-entry {
+      display: flex; align-items: center; gap: 6px;
+      padding: 2px 0; font-size: 13px; color: #fff;
+    }
+    .lb-entry.lb-player { font-weight: bold; }
+    .lb-entry.lb-sep { border-top: 1px solid rgba(255,255,255,0.1); margin-top: 4px; padding-top: 4px; }
+    .lb-rank { color: rgba(255,255,255,0.4); font-size: 11px; min-width: 14px; text-align: right; }
+    .lb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .lb-name { flex: 1; }
+    .lb-len { color: rgba(255,255,255,0.5); font-size: 11px; }
   </style>
 </head>
 <body>
@@ -278,6 +314,16 @@
     <div id="boost-bar-container">
       <div class="bar-label">LENGTH (BOOST FUEL)</div>
       <div id="boost-bar-bg"><div id="boost-bar" style="width:100%"></div></div>
+    </div>
+
+    <div id="your-score">
+      <div id="score-label">YOUR SCORE</div>
+      <div id="score-value">5</div>
+    </div>
+
+    <div id="leaderboard-panel">
+      <div class="lb-title">LEADERBOARD</div>
+      <div id="lb-entries"></div>
     </div>
 
     <div id="crosshair"></div>

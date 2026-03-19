@@ -143,6 +143,8 @@ export class SerpentManager {
 
     this._dummy = new THREE.Object3D();
     this._colorObj = new THREE.Color();
+    this._altColor = new THREE.Color();
+    this._white = new THREE.Color(0xffffff);
 
     // Wander noise offsets per bot
     this._botWanderTime = [];
@@ -602,19 +604,26 @@ export class SerpentManager {
       }
 
       // Body segments (skip index 0 = head is separate mesh)
-      // Use scale 1.05 for slight overlap between spheres = smoother snake look
+      // Use scale 1.15 for smoother overlap; taper more toward tail
       for (let i = 1; i < s.segmentCount && instanceIdx < MAX_TOTAL_SEGS; i++) {
         const seg = segs[i];
         if (!seg) continue;
 
         const y = getTerrainHeight(seg.x, seg.z) + 0.45;
-        const scale = Math.max(0.5, 1.0 - (i / s.segmentCount) * 0.4);
+        const scale = Math.max(0.45, 1.05 - (i / s.segmentCount) * 0.55);
 
         dummy.position.set(seg.x, y, seg.z);
-        dummy.scale.setScalar(scale * 1.05);
+        dummy.scale.setScalar(scale * 1.15);
         dummy.updateMatrix();
         this.bodyMesh.setMatrixAt(instanceIdx, dummy.matrix);
-        this.bodyMesh.setColorAt(instanceIdx, s.color);
+
+        // Alternating color pattern every 2 segments (bright / base)
+        if (Math.floor(i / 2) % 2 === 0) {
+          this._altColor.copy(s.color).lerp(this._white, 0.28);
+          this.bodyMesh.setColorAt(instanceIdx, this._altColor);
+        } else {
+          this.bodyMesh.setColorAt(instanceIdx, s.color);
+        }
         instanceIdx++;
       }
     }
