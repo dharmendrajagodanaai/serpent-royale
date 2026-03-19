@@ -149,18 +149,24 @@ export class TrailSystem {
   }
 
   update(serpents) {
-    let idx = 0;
+    // BUG 6 fix: use serpent.id as trail index to avoid mismatches after death
+    const used = new Set();
     for (const s of serpents) {
-      if (idx >= this.trails.length) break;
-      if (!s.alive) continue;
-
+      const idx = s.id;
+      if (idx >= this.trails.length) continue;
       const trail = this.trails[idx];
+
+      if (!s.alive) {
+        trail.line.visible = false;
+        continue;
+      }
+
       trail.line.visible = true;
       trail.line.material.color.set(s.color);
       trail.line.material.opacity = s.boosting ? 0.5 : 0.2;
+      used.add(idx);
 
       // Fill trail points from path
-      const len = Math.min(s.path.positions.length, this.maxPoints);
       const pathLen = s.path.positions.length;
       for (let j = 0; j < this.maxPoints; j++) {
         const pi = pathLen - 1 - j;
@@ -173,12 +179,11 @@ export class TrailSystem {
       }
 
       trail.line.geometry.setFromPoints(trail.pts);
-      idx++;
     }
 
-    // Hide unused trails
-    for (let i = idx; i < this.trails.length; i++) {
-      this.trails[i].line.visible = false;
+    // Hide trails not assigned to any alive serpent
+    for (let i = 0; i < this.trails.length; i++) {
+      if (!used.has(i)) this.trails[i].line.visible = false;
     }
   }
 }

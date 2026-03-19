@@ -51,6 +51,12 @@ function playNoise(duration, filterFreq, gainVal, when = 0) {
   src.stop(c.currentTime + when + duration);
 }
 
+// ─── Slither ambient ─────────────────────────────────────────────────────────
+
+let _slitherSrc = null;
+let _slitherGain = null;
+let _slitherFilter = null;
+
 // ─── Sound effects ───────────────────────────────────────────────────────────
 
 export const Audio = {
@@ -119,5 +125,54 @@ export const Audio = {
     playTone(880, 'sine', 0.3, 0.25);
     playTone(1100, 'sine', 0.25, 0.15, 0.08);
     playTone(1320, 'sine', 0.4, 0.2, 0.16);
-  }
+  },
+
+  // Continuous ambient slither noise — call slitherStart() on match begin
+  slitherStart() {
+    this.slitherStop(); // stop any previous
+    resume();
+    const c = getCtx();
+
+    // 1-second looping noise buffer
+    const bufLen = c.sampleRate;
+    const buf = c.createBuffer(1, bufLen, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+
+    _slitherSrc = c.createBufferSource();
+    _slitherSrc.buffer = buf;
+    _slitherSrc.loop = true;
+
+    _slitherFilter = c.createBiquadFilter();
+    _slitherFilter.type = 'bandpass';
+    _slitherFilter.frequency.value = 600;
+    _slitherFilter.Q.value = 4;
+
+    _slitherGain = c.createGain();
+    _slitherGain.gain.value = 0.018;
+
+    _slitherSrc.connect(_slitherFilter);
+    _slitherFilter.connect(_slitherGain);
+    _slitherGain.connect(c.destination);
+    _slitherSrc.start();
+  },
+
+  // Call each frame with whether the player is currently boosting
+  slitherUpdate(boosting) {
+    if (!_slitherGain || !_slitherFilter) return;
+    const c = getCtx();
+    const targetGain = boosting ? 0.038 : 0.018;
+    const targetFreq = boosting ? 1300 : 620;
+    _slitherGain.gain.setTargetAtTime(targetGain, c.currentTime, 0.15);
+    _slitherFilter.frequency.setTargetAtTime(targetFreq, c.currentTime, 0.15);
+  },
+
+  slitherStop() {
+    if (_slitherSrc) {
+      try { _slitherSrc.stop(); } catch (_) {}
+      _slitherSrc = null;
+      _slitherGain = null;
+      _slitherFilter = null;
+    }
+  },
 };

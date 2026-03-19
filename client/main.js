@@ -8,9 +8,10 @@ import { CameraController } from './camera.js';
 import { buildComposer, ParticleSystem, TrailSystem } from './effects.js';
 import { Audio } from './audio.js';
 import {
-  addKillFeed, updateHUD, updateMinimap,
+  addKillFeed, clearKillFeed, updateHUD, updateMinimap,
   showHUD, showCountdown, showStartScreen,
-  showResults, showDamageOverlay, showAliveBanner
+  showResults, showDamageOverlay, showAliveBanner,
+  showKilledBy,
 } from './ui.js';
 
 // ─── Game State ───────────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ let playerStats = { kills: 0, maxLength: 5, placement: 8 };
 let damageFlash = 0;
 let zoneWarnCooldown = 0;
 let prevAliveCount = 8;
+let playerOutsideZone = false; // track for damage flash fade rate
 
 // ─── Three.js Setup ───────────────────────────────────────────────────────────
 
@@ -79,6 +81,7 @@ function resetSystems() {
   // Remove all current scene children
   while (scene.children.length > 0) scene.remove(scene.children[0]);
   addLights();
+  clearKillFeed(); // BUG 3 fix
   initSystems();
 }
 
@@ -166,6 +169,7 @@ function beginMatch() {
   prevAliveCount = 8;
   damageFlash = 0;
   zoneWarnCooldown = 0;
+  playerOutsideZone = false;
   inputDirX = 0; inputDirZ = -1;
 
   serpentManager.spawnSerpents(0);
@@ -175,6 +179,7 @@ function beginMatch() {
   showCountdown(null);
   showHUD(true);
   Audio.go();
+  Audio.slitherStart();
   gameState = STATE.PLAYING;
 }
 
@@ -212,9 +217,18 @@ function handleDeath(serpent, killer) {
   if (serpent.isPlayer) {
     gameState = STATE.DEAD;
     Audio.death();
+    Audio.slitherStop();
     damageFlash = 1.0;
     playerStats.placement = serpentManager.aliveCount + 1;
     playerStats.maxLength = Math.max(playerStats.maxLength, serpent.segmentCount);
+
+    // BUG 7 fix: orbit camera around death position
+    cameraController.setDeathMode(serpent.headPos.x, serpent.headPos.z);
+
+    // Show killer name overlay
+    if (killer) {
+      showKilledBy(killer.name, SERPENT_COLORS[killer.id]);
+    }
 
     setTimeout(() => {
       showResults(false, playerStats);
@@ -239,6 +253,7 @@ function checkWinCondition() {
       playerStats.placement = 1;
       playerStats.maxLength = Math.max(playerStats.maxLength, survivor.segmentCount);
       Audio.victory();
+      Audio.slitherStop();
       showAliveBanner('YOU WIN!');
       gameState = STATE.DEAD; // prevent re-trigger
       setTimeout(() => {
@@ -254,6 +269,8 @@ function checkWinCondition() {
 // ─── Main Loop ────────────────────────────────────────────────────────────────
 
 let lastTime = performance.now();
+// BUG 4 fix: guard against starting multiple tick loops
+let tickLoopRunning = false;
 
 function tick(now) {
   requestAnimationFrame(tick);
@@ -274,6 +291,14 @@ function tick(now) {
 
   if (composer) composer.render();
   else renderer.render(scene, camera);
+}
+
+function startTickLoop() {
+  // BUG 4 fix: only start one tick loop
+  if (tickLoopRunning) return;
+  tickLoopRunning = true;
+  lastTime = performance.now();
+  requestAnimationFrame(tick);
 }
 
 function updateCountdown(dt) {
@@ -317,11 +342,13 @@ function updateGame(dt) {
 
   // ── Zone damage ──
   zoneWarnCooldown -= dt;
+  playerOutsideZone = false;
   for (const s of serpentManager.serpents) {
     if (!s.alive) continue;
     if (!zoneManager.isInZone(s.headPos.x, s.headPos.z)) {
       const died = serpentManager.applyZoneDamage(s, dt);
       if (s.isPlayer) {
+        playerOutsideZone = true;
         damageFlash = Math.min(1, damageFlash + dt * 1.5);
         if (zoneWarnCooldown <= 0) {
           Audio.zoneWarning();
@@ -329,9 +356,15 @@ function updateGame(dt) {
         }
       }
       if (died) handleDeath(s, null);
-    } else if (s.isPlayer) {
+    } else {
+      // BUG 2 fix: reset zone damage timer for ALL alive serpents inside the zone
       s.zoneDamageTimer = 0;
     }
+  }
+
+  // BUG 1 fix: build segment caches for all alive serpents BEFORE collision detection
+  for (const s of serpentManager.serpents) {
+    if (s.alive) s.path.buildSegmentCache(s.segmentCount);
   }
 
   // ── Collision detection ──
@@ -350,12 +383,17 @@ function updateGame(dt) {
   serpentManager.render();
   orbManager.update(globalTime);
 
-  // ── Camera ──
-  if (player && player.alive) cameraController.update(player, dt);
+  // ── Camera — always update (handles dead/orbit mode internally) ──
+  cameraController.update(player, dt);
 
-  // ── Damage flash fade ──
-  damageFlash *= 0.90;
+  // ── Damage flash fade — slower when outside zone (more threatening) ──
+  damageFlash *= playerOutsideZone ? 0.97 : 0.90;
   showDamageOverlay(damageFlash);
+
+  // ── Slither ambient sound ──
+  if (player && player.alive) {
+    Audio.slitherUpdate(player.boosting || boostActive);
+  }
 
   // ── HUD ──
   updateHUD(serpentManager, zoneManager, matchTime);
@@ -376,8 +414,7 @@ window.addEventListener('resize', () => {
 document.getElementById('play-btn')?.addEventListener('click', () => {
   if (!systemsReady) initSystems();
   startGame();
-  lastTime = performance.now();
-  requestAnimationFrame(tick);
+  startTickLoop(); // BUG 4 fix: guarded start
 }, { once: true });
 
 document.getElementById('play-again-btn')?.addEventListener('click', () => {
@@ -385,6 +422,7 @@ document.getElementById('play-again-btn')?.addEventListener('click', () => {
   showHUD(false);
   resetSystems();
   startGame();
+  startTickLoop(); // BUG 4 fix: ensures loop running, guard prevents double-start
 });
 
 // ─── Initial Load ─────────────────────────────────────────────────────────────

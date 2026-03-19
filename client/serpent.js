@@ -276,8 +276,8 @@ export class SerpentManager {
       // Wander component
       s.wanderTimer -= dt;
       if (s.wanderTimer <= 0) {
-        s.wanderAngle += (Math.random() - 0.5) * 1.8;
-        s.wanderTimer = 0.4 + Math.random() * 0.8;
+        s.wanderAngle = Math.atan2(s.headDir.z, s.headDir.x) + (Math.random() - 0.5) * 2.0;
+        s.wanderTimer = 0.5 + Math.random() * 0.7;
       }
       const wx = Math.cos(s.wanderAngle);
       const wz = Math.sin(s.wanderAngle);
@@ -299,6 +299,39 @@ export class SerpentManager {
         }
       }
 
+      // Body collision avoidance — steer away from nearby serpent segments
+      let avoidX = 0, avoidZ = 0;
+      for (const other of this.serpents) {
+        if (!other.alive) continue;
+        const segs = other.path.segmentPositions;
+        if (!segs || segs.length === 0) continue;
+        // Skip own segments near head; for others check first 12
+        const startSeg = other === s ? 4 : 0;
+        const checkCount = Math.min(other.segmentCount, 12);
+        for (let si = startSeg; si < checkCount; si++) {
+          const seg = segs[si];
+          if (!seg) continue;
+          const adx = s.headPos.x - seg.x;
+          const adz = s.headPos.z - seg.z;
+          const d2 = adx * adx + adz * adz;
+          if (d2 < 16 && d2 > 0.01) { // 4-unit detection radius
+            const d = Math.sqrt(d2);
+            const w = 1 - d / 4;
+            avoidX += (adx / d) * w;
+            avoidZ += (adz / d) * w;
+          }
+        }
+      }
+      if (avoidX !== 0 || avoidZ !== 0) {
+        const avoidMag = Math.sqrt(avoidX * avoidX + avoidZ * avoidZ);
+        if (avoidMag > 0.001) {
+          const anx = avoidX / avoidMag, anz = avoidZ / avoidMag;
+          const strength = Math.min(1, avoidMag * 0.35) * 0.65;
+          blendX = blendX * (1 - strength) + anx * strength;
+          blendZ = blendZ * (1 - strength) + anz * strength;
+        }
+      }
+
       // Normalize
       const len = Math.sqrt(blendX * blendX + blendZ * blendZ);
       if (len > 0.001) { blendX /= len; blendZ /= len; }
@@ -317,6 +350,8 @@ export class SerpentManager {
       s.path.update(s.headDir.x, s.headDir.z, BASE_SPEED, dt);
       s.headPos.x = s.path.headPos.x;
       s.headPos.z = s.path.headPos.z;
+      s.headDir.x = s.path.headDir.x;
+      s.headDir.z = s.path.headDir.z;
     }
   }
 
