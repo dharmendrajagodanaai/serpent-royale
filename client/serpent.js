@@ -276,8 +276,8 @@ export class SerpentManager {
       // Wander component
       s.wanderTimer -= dt;
       if (s.wanderTimer <= 0) {
-        s.wanderAngle += (Math.random() - 0.5) * 1.8;
-        s.wanderTimer = 0.4 + Math.random() * 0.8;
+        s.wanderAngle = Math.atan2(s.headDir.z, s.headDir.x) + (Math.random() - 0.5) * 2.0;
+        s.wanderTimer = 0.5 + Math.random() * 0.7;
       }
       const wx = Math.cos(s.wanderAngle);
       const wz = Math.sin(s.wanderAngle);
@@ -317,6 +317,8 @@ export class SerpentManager {
       s.path.update(s.headDir.x, s.headDir.z, BASE_SPEED, dt);
       s.headPos.x = s.path.headPos.x;
       s.headPos.z = s.path.headPos.z;
+      s.headDir.x = s.path.headDir.x;
+      s.headDir.z = s.path.headDir.z;
     }
   }
 
