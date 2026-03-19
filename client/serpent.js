@@ -154,6 +154,7 @@ export class SerpentManager {
     this.bodyMesh = new THREE.InstancedMesh(geo, mat, MAX_TOTAL_SEGS);
     this.bodyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.bodyMesh.castShadow = false;
+    this.bodyMesh.frustumCulled = false; // instances span entire map; prevent Three.js from culling based on tiny local bounding sphere
     this.bodyMesh.count = 0;
     this.scene.add(this.bodyMesh);
   }
@@ -171,6 +172,7 @@ export class SerpentManager {
       });
       const mesh = new THREE.Mesh(headGeo, mat);
       mesh.visible = false;
+      mesh.frustumCulled = false; // heads move across map; prevent culling at edge positions
       this.scene.add(mesh);
       this.headMeshes.push(mesh);
 

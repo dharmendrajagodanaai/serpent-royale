@@ -28,6 +28,7 @@ export class OrbManager {
     });
     this.mesh = new THREE.InstancedMesh(geo, mat, MAX_ORBS);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false; // instances span entire map; prevent culling based on local bounding sphere
     this.mesh.count = 0;
     this.scene.add(this.mesh);
 

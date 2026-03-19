@@ -201,7 +201,8 @@ export class Terrain {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const mat = new THREE.PointsMaterial({
-      color: 0x003344, size: 3, transparent: true, opacity: 0.4
+      color: 0x003344, size: 3, transparent: true, opacity: 0.4,
+      depthWrite: false // prevent transparent fog from occluding game objects
     });
     this.edgeFog = new THREE.Points(geo, mat);
     this.scene.add(this.edgeFog);

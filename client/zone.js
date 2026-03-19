@@ -66,7 +66,8 @@ export class ZoneManager {
     const ringGeo = new THREE.RingGeometry(0.9, 1.05, 80);
     ringGeo.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff3040, transparent: true, opacity: 0.5, side: THREE.DoubleSide
+      color: 0xff3040, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
+      depthWrite: false // prevent transparent ring from occluding objects underneath
     });
     this.ringMesh = new THREE.Mesh(ringGeo, ringMat);
     this.ringMesh.position.y = 0.1;
@@ -79,7 +80,8 @@ export class ZoneManager {
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
       color: 0x001122,
-      transparent: true, opacity: 0.0
+      transparent: true, opacity: 0.0,
+      depthWrite: false // invisible floor must not write to depth buffer
     });
     this.floorMesh = new THREE.Mesh(geo, mat);
     this.floorMesh.position.y = -0.05;
