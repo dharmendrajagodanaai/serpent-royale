@@ -78,7 +78,8 @@ export class ParticleSystem {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const mat = new THREE.PointsMaterial({
-      color, size: 0.4, transparent: true, opacity: 1.0
+      color, size: 0.4, transparent: true, opacity: 1.0,
+      depthWrite: false // prevent particles from occluding game objects
     });
     const points = new THREE.Points(geo, mat);
     this.scene.add(points);
@@ -139,9 +140,11 @@ export class TrailSystem {
 
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       const mat = new THREE.LineBasicMaterial({
-        color: 0x00ffcc, transparent: true, opacity: 0.3
+        color: 0x00ffcc, transparent: true, opacity: 0.3,
+        depthWrite: false // prevent transparent trails from occluding objects
       });
       const line = new THREE.Line(geo, mat);
+      line.frustumCulled = false; // trail spans map; prevent culling
       line.visible = false;
       this.scene.add(line);
       this.trails.push({ line, pts, color: 0x00ffcc });
