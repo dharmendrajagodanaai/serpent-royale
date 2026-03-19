@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>SERPENT ROYALE</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      color: #fff;
+      user-select: none;
+    }
+    #canvas-container {
+      position: fixed; inset: 0;
+    }
+    canvas { display: block; width: 100% !important; height: 100% !important; }
+
+    /* HUD */
+    #hud {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* Leaderboard */
+    #leaderboard {
+      position: absolute; top: 16px; right: 16px;
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-width: 180px;
+    }
+    .lb-title {
+      font-size: 10px; color: #888;
+      text-transform: uppercase; letter-spacing: 2px;
+      margin-bottom: 6px; text-align: center;
+    }
+    .lb-row {
+      display: flex; align-items: center; gap: 5px;
+      padding: 2px 0; font-size: 12px;
+    }
+    .lb-row.lb-me { background: rgba(0,255,255,0.08); border-radius: 3px; padding: 2px 4px; }
+    .lb-rank { color: #555; width: 14px; font-size: 11px; }
+    .lb-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lb-len  { color: #0ff; font-weight: bold; font-size: 11px; }
+
+    /* Kill feed — below leaderboard */
+    #kill-feed {
+      position: absolute; top: 200px; right: 16px;
+      display: flex; flex-direction: column; align-items: flex-end;
+      gap: 4px; max-width: 320px;
+    }
+    .kill-entry {
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      animation: fadeKill 4s forwards;
+      white-space: nowrap;
+    }
+    @keyframes fadeKill {
+      0% { opacity: 1; transform: translateX(10px); }
+      80% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Stats bar */
+    #stats-bar {
+      position: absolute; top: 16px; left: 16px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .stat-item {
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 13px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .stat-label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+    .stat-value { color: #0ff; font-weight: bold; }
+
+    /* Zone timer */
+    #zone-timer {
+      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      border: 1px solid rgba(255,80,80,0.4);
+      border-radius: 6px;
+      padding: 6px 16px;
+      text-align: center;
+      min-width: 180px;
+    }
+    #zone-phase { font-size: 11px; color: #f80; text-transform: uppercase; letter-spacing: 2px; }
+    #zone-time { font-size: 22px; font-weight: bold; color: #ff4444; }
+    #zone-warning { font-size: 11px; color: #f80; display: none; }
+
+    /* Minimap */
+    #minimap-container {
+      position: absolute; bottom: 16px; right: 16px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 50%;
+      overflow: hidden;
+      box-shadow: 0 0 20px rgba(0,255,255,0.2);
+    }
+    #minimap { display: block; }
+
+    /* Powerup indicator */
+    #powerup-display {
+      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+      display: none;
+      flex-direction: column; align-items: center; gap: 4px;
+    }
+    #powerup-name { font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; }
+    #powerup-bar-bg {
+      width: 160px; height: 6px;
+      background: rgba(255,255,255,0.2); border-radius: 3px;
+    }
+    #powerup-bar { height: 100%; border-radius: 3px; transition: width 0.1s; }
+
+    /* Boost indicator */
+    #boost-bar-container {
+      position: absolute; bottom: 16px; left: 16px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .boost-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    #boost-bar-bg {
+      width: 120px; height: 8px;
+      background: rgba(255,255,255,0.15); border-radius: 4px;
+    }
+    #boost-bar {
+      height: 100%; border-radius: 4px;
+      background: linear-gradient(90deg, #0af, #08f);
+      transition: width 0.1s;
+    }
+
+    /* Killed-by banner */
+    #killed-by-banner {
+      position: fixed; top: 30%; left: 50%; transform: translateX(-50%);
+      background: rgba(200,0,0,0.85);
+      border: 2px solid #f44;
+      border-radius: 6px;
+      padding: 10px 28px;
+      font-size: 18px; font-weight: bold; letter-spacing: 3px;
+      color: #fff;
+      display: none;
+      z-index: 60;
+      pointer-events: none;
+      text-align: center;
+      animation: killedByFade 2s forwards;
+    }
+    @keyframes killedByFade {
+      0%   { opacity: 0; transform: translateX(-50%) scale(1.2); }
+      15%  { opacity: 1; transform: translateX(-50%) scale(1); }
+      70%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Overlay screens */
+    .overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.75);
+      z-index: 100;
+      backdrop-filter: blur(4px);
+    }
+    .overlay.hidden { display: none; }
+
+    #lobby-screen h1 {
+      font-size: 56px; font-weight: 900;
+      letter-spacing: 8px;
+      background: linear-gradient(135deg, #0ff, #08f, #f0f);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      text-shadow: none;
+      margin-bottom: 8px;
+    }
+    #lobby-screen .tagline {
+      font-size: 14px; color: #888; letter-spacing: 4px;
+      text-transform: uppercase; margin-bottom: 40px;
+    }
+    .player-name-row {
+      display: flex; gap: 12px; align-items: center;
+      margin-bottom: 16px;
+    }
+    #player-name-input {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 6px; padding: 10px 16px;
+      color: #fff; font-size: 16px; font-family: inherit;
+      outline: none; width: 200px;
+      pointer-events: all;
+    }
+    #player-name-input:focus { border-color: #0ff; }
+
+    /* Color picker swatches */
+    .color-picker-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 24px;
+    }
+    .color-picker-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .color-swatch {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      pointer-events: all;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .color-swatch:hover   { transform: scale(1.18); }
+    .color-swatch.selected { border-color: #fff; transform: scale(1.18); box-shadow: 0 0 10px currentColor; }
+
+    .btn {
+      background: transparent;
+      border: 2px solid currentColor;
+      color: #0ff; padding: 12px 32px;
+      font-size: 16px; font-family: inherit;
+      font-weight: bold; letter-spacing: 2px;
+      text-transform: uppercase;
+      border-radius: 6px; cursor: pointer;
+      pointer-events: all;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: rgba(0,255,255,0.15); box-shadow: 0 0 20px rgba(0,255,255,0.3); }
+    .btn-red { color: #f44; }
+    .btn-red:hover { background: rgba(255,68,68,0.15); box-shadow: 0 0 20px rgba(255,68,68,0.3); }
+
+    #lobby-countdown {
+      font-size: 48px; font-weight: bold; color: #0ff;
+      margin: 16px 0;
+      display: none;
+    }
+    #lobby-player-list {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      justify-content: center; max-width: 400px;
+      margin-bottom: 32px;
+    }
+    .player-chip {
+      padding: 4px 12px; border-radius: 20px;
+      font-size: 12px; border: 1px solid;
+    }
+    #controls-hint {
+      margin-top: 20px; font-size: 11px; color: #555;
+      text-align: center; line-height: 1.8;
+    }
+
+    /* Countdown 3-2-1 */
+    #countdown-screen .count-num {
+      font-size: 120px; font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 40px #0ff, 0 0 80px #0ff;
+      animation: countPulse 0.9s ease-out;
+    }
+    @keyframes countPulse {
+      0% { transform: scale(1.5); opacity: 0; }
+      40% { opacity: 1; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    #countdown-screen .go-text {
+      font-size: 80px; font-weight: 900;
+      background: linear-gradient(135deg, #0f0, #0ff);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      text-shadow: none;
+    }
+
+    /* Results screen */
+    #results-screen h2 {
+      font-size: 48px; font-weight: 900;
+      margin-bottom: 8px; letter-spacing: 4px;
+    }
+    #results-winner { font-size: 18px; margin-bottom: 32px; color: #0ff; }
+    #results-list {
+      width: 340px; margin-bottom: 32px;
+    }
+    .result-row {
+      display: flex; justify-content: space-between;
+      padding: 8px 12px; border-radius: 4px;
+      margin-bottom: 4px; font-size: 13px;
+    }
+    .result-row.player-row { background: rgba(0,255,255,0.1); border: 1px solid rgba(0,255,255,0.3); }
+    .result-rank { color: #888; width: 30px; }
+    .result-name { flex: 1; }
+    .result-stats { color: #888; font-size: 11px; }
+
+    #results-play-again {
+      pointer-events: all;
+      margin-top: 8px;
+    }
+
+    /* Death overlay (shown when player dies before match ends) */
+    #death-overlay {
+      position: fixed; inset: 0;
+      display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6);
+      z-index: 80;
+      backdrop-filter: blur(2px);
+      pointer-events: all;
+      animation: deathFadeIn 0.5s ease;
+    }
+    @keyframes deathFadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    .death-title {
+      font-size: 72px; font-weight: 900; letter-spacing: 8px;
+      color: #f44;
+      text-shadow: 0 0 40px rgba(255,68,68,0.7);
+      margin-bottom: 16px;
+    }
+    #death-killer { font-size: 20px; color: #faa; margin-bottom: 8px; }
+    #death-length { font-size: 16px; color: #888; margin-bottom: 4px; }
+    #death-kills  { font-size: 16px; color: #888; margin-bottom: 32px; }
+    .death-actions { display: flex; gap: 16px; }
+
+    /* Zone damage flash */
+    #damage-overlay {
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 50;
+      border: 0px solid rgba(255,60,60,0.8);
+      box-shadow: inset 0 0 80px rgba(255,0,0,0);
+      transition: box-shadow 0.1s, border-width 0.1s;
+    }
+    #damage-overlay.flashing {
+      box-shadow: inset 0 0 80px rgba(255,0,0,0.5);
+      border-width: 6px;
+    }
+
+    /* Mobile joystick */
+    #mobile-controls {
+      display: none;
+      position: fixed; bottom: 0; left: 0;
+      width: 100%; padding: 20px;
+      pointer-events: none;
+      z-index: 20;
+    }
+    #joystick-zone {
+      width: 140px; height: 140px;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.15);
+      border-radius: 50%;
+      position: relative;
+      pointer-events: all;
+      touch-action: none;
+    }
+    #joystick-knob {
+      width: 56px; height: 56px;
+      background: rgba(0,255,255,0.4);
+      border: 2px solid #0ff;
+      border-radius: 50%;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    #boost-btn {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: rgba(0,180,255,0.2);
+      border: 2px solid rgba(0,180,255,0.6);
+      color: #0af; font-size: 12px;
+      font-family: inherit; font-weight: bold;
+      letter-spacing: 1px; text-transform: uppercase;
+      pointer-events: all;
+      touch-action: none;
+      cursor: pointer;
+    }
+    @media (hover: none) and (pointer: coarse) {
+      #mobile-controls { display: flex; gap: 24px; align-items: flex-end; }
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <!-- Leaderboard (top-right) -->
+    <div id="leaderboard">
+      <div class="lb-title">Leaderboard</div>
+    </div>
+
+    <!-- Kill feed (below leaderboard) -->
+    <div id="kill-feed"></div>
+
+    <div id="stats-bar">
+      <div class="stat-item">
+        <span class="stat-label">Alive</span>
+        <span class="stat-value" id="alive-count">8</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Segments</span>
+        <span class="stat-value" id="segment-count">10</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Kills</span>
+        <span class="stat-value" id="kill-count">0</span>
+      </div>
+    </div>
+
+    <div id="zone-timer">
+      <div id="zone-phase">Zone Stable</div>
+      <div id="zone-time">3:00</div>
+      <div id="zone-warning">&#9888; OUTSIDE ZONE</div>
+    </div>
+
+    <div id="minimap-container">
+      <canvas id="minimap" width="140" height="140"></canvas>
+    </div>
+
+    <div id="powerup-display">
+      <div id="powerup-name">FRENZY</div>
+      <div id="powerup-bar-bg">
+        <div id="powerup-bar" style="width:100%;background:#f44;"></div>
+      </div>
+    </div>
+
+    <div id="boost-bar-container">
+      <div class="boost-label">Boost</div>
+      <div id="boost-bar-bg">
+        <div id="boost-bar" style="width:100%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Killed-by flash banner -->
+  <div id="killed-by-banner"></div>
+
+  <div id="damage-overlay"></div>
+
+  <!-- Death overlay (player died but match continues) -->
+  <div id="death-overlay">
+    <div class="death-title">YOU DIED</div>
+    <div id="death-killer">Killed by ...</div>
+    <div id="death-length">Length: 0</div>
+    <div id="death-kills">Kills: 0</div>
+    <div class="death-actions">
+      <button class="btn" id="death-spectate">Spectate</button>
+      <button class="btn btn-red" id="death-play-again">Play Again</button>
+    </div>
+  </div>
+
+  <!-- Lobby Screen -->
+  <div id="lobby-screen" class="overlay">
+    <h1>SERPENT ROYALE</h1>
+    <div class="tagline">3D Snake &middot; Battle Royale</div>
+    <div class="player-name-row">
+      <input type="text" id="player-name-input" placeholder="Your name..." maxlength="16" value="Player" />
+    </div>
+    <!-- Color swatch picker -->
+    <div class="color-picker-row">
+      <span class="color-picker-label">Color:</span>
+      <div class="color-swatch selected" style="background:#00ffff;" data-color="0x00ffff"></div>
+      <div class="color-swatch" style="background:#ff2244;" data-color="0xff2244"></div>
+      <div class="color-swatch" style="background:#ff7700;" data-color="0xff7700"></div>
+      <div class="color-swatch" style="background:#ffee00;" data-color="0xffee00"></div>
+      <div class="color-swatch" style="background:#00ff44;" data-color="0x00ff44"></div>
+      <div class="color-swatch" style="background:#4488ff;" data-color="0x4488ff"></div>
+      <div class="color-swatch" style="background:#cc00ff;" data-color="0xcc00ff"></div>
+      <div class="color-swatch" style="background:#ff44aa;" data-color="0xff44aa"></div>
+    </div>
+    <div id="lobby-player-list"></div>
+    <button class="btn" id="start-btn">Play Now</button>
+    <div id="lobby-countdown"></div>
+    <div id="controls-hint">
+      Mouse &rarr; Steer &nbsp;|&nbsp; Left Click / W &rarr; Boost (drops orbs!)<br/>
+      Space &rarr; U-Turn &nbsp;|&nbsp; Boost is a risk/reward: grow shorter, drop orbs
+    </div>
+  </div>
+
+  <!-- Countdown Screen -->
+  <div id="countdown-screen" class="overlay hidden">
+    <div id="count-display" class="count-num">3</div>
+  </div>
+
+  <!-- Results Screen -->
+  <div id="results-screen" class="overlay hidden">
+    <h2 id="results-title">MATCH OVER</h2>
+    <div id="results-winner"></div>
+    <div id="results-list"></div>
+    <button class="btn" id="results-play-again">Play Again</button>
+  </div>
+
+  <!-- Mobile controls -->
+  <div id="mobile-controls">
+    <div id="joystick-zone">
+      <div id="joystick-knob"></div>
+    </div>
+    <button id="boost-btn">BOOST</button>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
