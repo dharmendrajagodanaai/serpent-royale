@@ -8,7 +8,7 @@ import { CameraController } from './camera.js';
 import { buildComposer, ParticleSystem, TrailSystem } from './effects.js';
 import { Audio } from './audio.js';
 import {
-  addKillFeed, clearKillFeed, updateHUD, updateMinimap,
+  addKillFeed, clearKillFeed, updateHUD, updateMinimap, updateLeaderboard,
   showHUD, showCountdown, showStartScreen,
   showResults, showDamageOverlay, showAliveBanner,
   showKilledBy,
@@ -325,10 +325,12 @@ function updateGame(dt) {
 
   // ── Update serpents ──
   if (player && player.alive) {
-    serpentManager.updatePlayer(dt, inputDirX, inputDirZ, boostActive);
+    const playerDrops = serpentManager.updatePlayer(dt, inputDirX, inputDirZ, boostActive);
+    for (const d of playerDrops) orbManager.spawnBoostOrb(d.x, d.z);
     playerStats.maxLength = Math.max(playerStats.maxLength, player.segmentCount);
   }
-  serpentManager.updateBots(dt, orbManager, zoneManager);
+  const botDrops = serpentManager.updateBots(dt, orbManager, zoneManager);
+  for (const d of botDrops) orbManager.spawnBoostOrb(d.x, d.z);
 
   // ── Orb collection ──
   const orbEvents = orbManager.checkCollection(serpentManager.serpents);
@@ -374,6 +376,12 @@ function updateGame(dt) {
       if (!victim.alive) continue;
       handleDeath(victim, killer);
     }
+    // Head-to-head: both snakes die
+    const headKills = collisionSystem.checkHeadHead(serpentManager.serpents);
+    for (const { victim, killer } of headKills) {
+      if (!victim.alive) continue;
+      handleDeath(victim, killer);
+    }
   }
 
   // ── Win check ──
@@ -398,6 +406,7 @@ function updateGame(dt) {
   // ── HUD ──
   updateHUD(serpentManager, zoneManager, matchTime);
   updateMinimap(serpentManager, zoneManager);
+  updateLeaderboard(serpentManager);
 }
 
 // ─── Resize ───────────────────────────────────────────────────────────────────

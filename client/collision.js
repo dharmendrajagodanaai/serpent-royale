@@ -14,7 +14,7 @@ export class CollisionSystem {
     this._grid = new Map();
   }
 
-  // Build spatial hash from all serpent body segments
+  // Build spatial hash from ALL body segments (including front segments of other snakes)
   _buildGrid(serpents) {
     const grid = this._grid;
     grid.clear();
@@ -22,8 +22,8 @@ export class CollisionSystem {
     for (const s of serpents) {
       if (!s.alive) continue;
       const segs = s.path.segmentPositions;
-      // Skip first few segments near head to avoid false positives
-      for (let i = 3; i < s.segmentCount; i++) {
+      // FIX: start from i=0 so other snakes' front segments are detectable
+      for (let i = 0; i < s.segmentCount; i++) {
         const seg = segs[i];
         if (!seg) continue;
         const cx = Math.floor(seg.x / CELL_SIZE);
@@ -35,7 +35,7 @@ export class CollisionSystem {
     }
   }
 
-  // Returns array of { victim, killer } pairs
+  // Returns array of { victim, killer } pairs — head hits another snake's body
   checkHeadBody(serpents) {
     this._buildGrid(serpents);
     const grid = this._grid;
@@ -57,16 +57,39 @@ export class CollisionSystem {
           if (!cell) continue;
 
           for (const entry of cell) {
-            if (entry.serpent === attacker) continue; // no self-collision
+            // Skip own body entirely (no self-collision)
+            if (entry.serpent === attacker) continue;
             const ex = hx - entry.x;
             const ez = hz - entry.z;
             if (ex * ex + ez * ez < distSq) {
-              // Check we haven't already killed this attacker this frame
               if (!kills.some(k => k.victim === attacker)) {
                 kills.push({ victim: attacker, killer: entry.serpent });
               }
             }
           }
+        }
+      }
+    }
+
+    return kills;
+  }
+
+  // Returns array of { victim, killer } for head-to-head collisions (both die)
+  checkHeadHead(serpents) {
+    const kills = [];
+    const distSq = (HEAD_RADIUS * 2) * (HEAD_RADIUS * 2);
+
+    for (let i = 0; i < serpents.length; i++) {
+      const a = serpents[i];
+      if (!a.alive) continue;
+      for (let j = i + 1; j < serpents.length; j++) {
+        const b = serpents[j];
+        if (!b.alive) continue;
+        const dx = a.headPos.x - b.headPos.x;
+        const dz = a.headPos.z - b.headPos.z;
+        if (dx * dx + dz * dz < distSq) {
+          if (!kills.some(k => k.victim === a)) kills.push({ victim: a, killer: b });
+          if (!kills.some(k => k.victim === b)) kills.push({ victim: b, killer: a });
         }
       }
     }
