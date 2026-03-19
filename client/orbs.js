@@ -3,8 +3,8 @@ import { getTerrainHeight } from './terrain.js';
 
 const MAX_ORBS = 500;
 const ORBS_AT_START = 60;
-const ORB_COLLECT_DIST = 1.4;
-const ORB_COLLECT_DIST_BOOST = 1.9; // wider sweep when boosting at speed
+const ORB_COLLECT_DIST = 1.8;
+const ORB_COLLECT_DIST_BOOST = 2.5; // wider sweep when boosting at speed
 const ORB_RADIUS = 0.22;
 
 // Returns squared distance from point (px,pz) to segment (ax,az)→(bx,bz)
@@ -38,7 +38,7 @@ export class OrbManager {
     const mat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0x44ff88,
-      emissiveIntensity: 1.2,
+      emissiveIntensity: 1.8,
       roughness: 0.1, metalness: 0.3
     });
     this.mesh = new THREE.InstancedMesh(geo, mat, MAX_ORBS);
@@ -86,7 +86,7 @@ export class OrbManager {
     );
   }
 
-  // Called when a serpent dies — scatter segments as orbs
+  // Called when a serpent dies — scatter orbs along entire body path
   scatter(serpent) {
     const segs = serpent.path.segmentPositions;
     if (!segs || segs.length === 0 || serpent.segmentCount === 0) return;
@@ -94,9 +94,13 @@ export class OrbManager {
     for (let i = 0; i < count; i++) {
       const seg = segs[i];
       if (!seg) continue;
-      const spreadX = seg.x + (Math.random() - 0.5) * 3;
-      const spreadZ = seg.z + (Math.random() - 0.5) * 3;
-      this._addOrb(spreadX, spreadZ, 0xff6644);
+      // Drop 2 orbs near the head half, 1 toward the tail
+      const orbsHere = i < count * 0.6 ? 2 : 1;
+      for (let k = 0; k < orbsHere; k++) {
+        const spreadX = seg.x + (Math.random() - 0.5) * 3.5;
+        const spreadZ = seg.z + (Math.random() - 0.5) * 3.5;
+        this._addOrb(spreadX, spreadZ, 0xff6644);
+      }
     }
     // Keep total under MAX_ORBS
     while (this.orbs.length > MAX_ORBS) this.orbs.shift();
@@ -116,6 +120,18 @@ export class OrbManager {
       for (let i = this.orbs.length - 1; i >= 0; i--) {
         const orb = this.orbs[i];
         if (!orb.alive) continue;
+
+        // Vacuum pull: orbs within 3 units drift toward head
+        const hdx = s.headPos.x - orb.x;
+        const hdz = s.headPos.z - orb.z;
+        const hd2 = hdx * hdx + hdz * hdz;
+        if (hd2 < 9 && hd2 > 0.01) {
+          const hd = Math.sqrt(hd2);
+          const pull = 0.07 * (1 - hd / 3);
+          orb.x += (hdx / hd) * pull;
+          orb.z += (hdz / hd) * pull;
+        }
+
         // Swept check: distance from orb center to head movement segment
         const d2 = pointToSegDistSq(orb.x, orb.z, prevX, prevZ, s.headPos.x, s.headPos.z);
         if (d2 < distSq) {
@@ -151,10 +167,11 @@ export class OrbManager {
 
     for (const orb of this.orbs) {
       if (!orb.alive) continue;
-      // Bobbing animation
+      // Bobbing + pulsing animation for vibrant glow effect
       const yOff = Math.sin(time * 2.0 + orb.bobOffset) * 0.15;
+      const pulse = 0.85 + Math.sin(time * 3.5 + orb.bobOffset) * 0.15;
       dummy.position.set(orb.x, orb.y + 0.35 + yOff, orb.z);
-      dummy.scale.setScalar(1.0);
+      dummy.scale.setScalar(pulse);
       dummy.updateMatrix();
       mesh.setMatrixAt(idx, dummy.matrix);
       col.set(orb.color);

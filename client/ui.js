@@ -46,6 +46,10 @@ export function updateHUD(serpentManager, zoneManager, matchTime) {
   const lenEl = document.getElementById('stat-length');
   if (lenEl && player) lenEl.textContent = player.alive ? player.segmentCount : '0';
 
+  // YOUR SCORE indicator (top center)
+  const scoreEl = document.getElementById('score-value');
+  if (scoreEl && player) scoreEl.textContent = player.alive ? player.segmentCount : '0';
+
   // Alive count
   const aliveEl = document.getElementById('stat-alive');
   if (aliveEl) aliveEl.textContent = serpentManager.aliveCount;
@@ -159,6 +163,7 @@ export function updateLeaderboard(serpentManager) {
     const cls = s.isPlayer ? ' lb-player' : '';
     html += `<div class="lb-entry${cls}">
       <span class="lb-rank">${rank + 1}</span>
+      <span class="lb-dot" style="background:${col};box-shadow:0 0 5px ${col}"></span>
       <span class="lb-name" style="color:${col}">${s.name}</span>
       <span class="lb-len">${s.segmentCount}</span>
     </div>`;
@@ -169,6 +174,7 @@ export function updateLeaderboard(serpentManager) {
     const col = '#' + player.color.getHexString();
     html += `<div class="lb-entry lb-player lb-sep">
       <span class="lb-rank">${rank}</span>
+      <span class="lb-dot" style="background:${col};box-shadow:0 0 5px ${col}"></span>
       <span class="lb-name" style="color:${col}">${player.name}</span>
       <span class="lb-len">${player.segmentCount}</span>
     </div>`;
