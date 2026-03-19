@@ -63,6 +63,7 @@ export class OrbManager {
   // Called when a serpent dies — scatter segments as orbs
   scatter(serpent) {
     const segs = serpent.path.segmentPositions;
+    if (!segs || segs.length === 0 || serpent.segmentCount === 0) return;
     const count = Math.min(serpent.segmentCount, segs.length);
     for (let i = 0; i < count; i++) {
       const seg = segs[i];

@@ -7,9 +7,36 @@ export class CameraController {
     this._targetPos = new THREE.Vector3();
     this._lookAt = new THREE.Vector3();
     this._currentLook = new THREE.Vector3();
+    this._deathPos = new THREE.Vector3();
+    this._deathOrbitAngle = 0;
+    this._deadMode = false;
+  }
+
+  // Called when player dies — begin orbiting around death position
+  setDeathMode(x, z) {
+    this._deathPos.set(x, 0, z);
+    this._deathOrbitAngle = Math.atan2(
+      this.camera.position.z - z,
+      this.camera.position.x - x
+    );
+    this._deadMode = true;
   }
 
   update(serpent, dt) {
+    if (this._deadMode) {
+      // Slowly orbit around death position
+      this._deathOrbitAngle += dt * 0.35;
+      const r = 20;
+      const h = 12;
+      const tx = this._deathPos.x + Math.cos(this._deathOrbitAngle) * r;
+      const tz = this._deathPos.z + Math.sin(this._deathOrbitAngle) * r;
+      this._targetPos.set(tx, h, tz);
+      this.camera.position.lerp(this._targetPos, 0.04);
+      this._currentLook.lerp(this._deathPos, 0.08);
+      this.camera.lookAt(this._currentLook);
+      return;
+    }
+
     if (!serpent || !serpent.alive) return;
 
     const hx = serpent.headPos.x;
@@ -44,6 +71,7 @@ export class CameraController {
 
   // Hard reset (used on spawn)
   reset(serpent) {
+    this._deadMode = false;
     if (!serpent) return;
     const hx = serpent.headPos.x;
     const hz = serpent.headPos.z;

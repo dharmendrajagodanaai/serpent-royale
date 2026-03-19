@@ -82,16 +82,45 @@
     #crosshair {
       position: absolute; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 10px; height: 10px;
-      border: 2px solid rgba(255,255,255,0.4);
+      width: 12px; height: 12px;
+      border: 1.5px solid rgba(255,255,255,0.25);
       border-radius: 50%;
+      animation: crosshairPulse 2s ease-in-out infinite;
+    }
+    @keyframes crosshairPulse {
+      0%,100% { opacity: 0.25; transform: translate(-50%, -50%) scale(1); }
+      50% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.25); }
     }
 
     #damage-overlay {
       position: absolute; inset: 0;
-      background: radial-gradient(ellipse at center, transparent 40%, rgba(255,0,0,0.3) 100%);
+      background: radial-gradient(ellipse at center, transparent 28%, rgba(255,0,0,0.65) 100%);
       opacity: 0; pointer-events: none;
-      transition: opacity 0.1s;
+      transition: opacity 0.05s;
+    }
+
+    /* Killed-by overlay shown briefly after player dies */
+    #killed-by-overlay {
+      position: fixed; top: 38%; left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      flex-direction: column; align-items: center; gap: 6px;
+      z-index: 95; pointer-events: none;
+      animation: killedByFade 2.2s ease forwards;
+    }
+    #killed-by-label {
+      font-size: 13px; color: rgba(255,255,255,0.55);
+      letter-spacing: 5px; text-transform: uppercase;
+    }
+    #killed-by-name {
+      font-size: 34px; font-weight: bold;
+      letter-spacing: 6px; text-transform: uppercase;
+    }
+    @keyframes killedByFade {
+      0% { opacity: 0; transform: translateX(-50%) scale(0.85); }
+      15% { opacity: 1; transform: translateX(-50%) scale(1); }
+      70% { opacity: 1; }
+      100% { opacity: 0; }
     }
 
     /* Start Screen */
@@ -254,6 +283,12 @@
     <div id="crosshair"></div>
     <div id="damage-overlay"></div>
     <div id="alive-banner"></div>
+  </div>
+
+  <!-- Killed By Overlay -->
+  <div id="killed-by-overlay">
+    <div id="killed-by-label">KILLED BY</div>
+    <div id="killed-by-name">BOT-1</div>
   </div>
 
   <!-- Results Screen -->

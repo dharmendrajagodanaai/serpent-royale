@@ -30,6 +30,13 @@ export function addKillFeed(killerName, victimName, killerColorHex, victimColorH
   setTimeout(() => { el.remove(); killEntries = killEntries.filter(e => e !== el); }, 3000);
 }
 
+// BUG 3 fix: clear kill feed on Play Again
+export function clearKillFeed() {
+  const feed = document.getElementById('kill-feed');
+  if (feed) feed.innerHTML = '';
+  killEntries = [];
+}
+
 // ─── HUD stats ───────────────────────────────────────────────────────────────
 
 export function updateHUD(serpentManager, zoneManager, matchTime) {
@@ -179,7 +186,7 @@ export function showResults(won, stats) {
 
 export function showDamageOverlay(intensity) {
   const el = document.getElementById('damage-overlay');
-  if (el) el.style.opacity = Math.min(0.8, intensity).toString();
+  if (el) el.style.opacity = Math.min(0.9, intensity).toString();
 }
 
 export function showAliveBanner(msg) {
@@ -190,4 +197,20 @@ export function showAliveBanner(msg) {
   el.style.color = msg.includes('WIN') ? '#ffcc00' : '#ff4444';
   el.style.textShadow = `0 0 20px currentColor`;
   setTimeout(() => { el.style.opacity = '0'; }, 2500);
+}
+
+// Show "KILLED BY [name]" overlay after player dies
+export function showKilledBy(killerName, killerColorHex) {
+  const el = document.getElementById('killed-by-overlay');
+  if (!el) return;
+  const nameEl = document.getElementById('killed-by-name');
+  if (nameEl && killerName) {
+    const col = '#' + killerColorHex.toString(16).padStart(6, '0');
+    nameEl.textContent = killerName;
+    nameEl.style.color = col;
+    nameEl.style.textShadow = `0 0 20px ${col}`;
+  }
+  el.style.display = 'flex';
+  // auto-hide after results screen appears
+  setTimeout(() => { el.style.display = 'none'; }, 2200);
 }
