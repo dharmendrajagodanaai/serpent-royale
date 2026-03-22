@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Terrain } from './terrain.js';
-import { SerpentManager, SERPENT_COLORS } from './serpent.js';
+import { SerpentManager, SERPENT_COLORS, TOTAL_SERPENTS } from './serpent.js';
 import { OrbManager } from './orbs.js';
 import { ZoneManager } from './zone.js';
 import { CollisionSystem } from './collision.js';
@@ -20,9 +20,11 @@ const STATE = { START: 0, COUNTDOWN: 1, PLAYING: 2, DEAD: 3, GAMEOVER: 4 };
 let gameState = STATE.START;
 let countdownTimer = 0;
 let countdownStep = 3;
+const ARENA_RADIUS = 95; // hard circular kill boundary (separate from battle royale zone)
+
 let matchTime = 0;
 let globalTime = 0;
-let playerStats = { kills: 0, maxLength: 5, placement: 8 };
+let playerStats = { kills: 0, maxLength: 5, placement: TOTAL_SERPENTS };
 let damageFlash = 0;
 let zoneWarnCooldown = 0;
 let prevAliveCount = 8;
@@ -72,8 +74,22 @@ function initSystems() {
   collisionSystem = new CollisionSystem();
   cameraController = new CameraController(camera);
   particles = new ParticleSystem(scene);
-  trails = new TrailSystem(scene, 8, 35);
+  trails = new TrailSystem(scene, TOTAL_SERPENTS, 35);
   composer = buildComposer(renderer, scene, camera);
+
+  // Boundary ring — hard kill boundary, separate from battle royale zone
+  {
+    const pts = [];
+    const N = 128;
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      pts.push(Math.cos(a) * ARENA_RADIUS, 2.5, Math.sin(a) * ARENA_RADIUS);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    scene.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xff3300 })));
+  }
+
   systemsReady = true;
 }
 
@@ -165,8 +181,8 @@ function startGame() {
 
 function beginMatch() {
   matchTime = 0;
-  playerStats = { kills: 0, maxLength: 5, placement: 8 };
-  prevAliveCount = 8;
+  playerStats = { kills: 0, maxLength: 5, placement: TOTAL_SERPENTS, timeSurvived: 0 };
+  prevAliveCount = TOTAL_SERPENTS;
   damageFlash = 0;
   zoneWarnCooldown = 0;
   playerOutsideZone = false;
@@ -221,6 +237,7 @@ function handleDeath(serpent, killer) {
     damageFlash = 1.0;
     playerStats.placement = serpentManager.aliveCount + 1;
     playerStats.maxLength = Math.max(playerStats.maxLength, serpent.segmentCount);
+    playerStats.timeSurvived = matchTime;
 
     // BUG 7 fix: orbit camera around death position
     cameraController.setDeathMode(serpent.headPos.x, serpent.headPos.z);
@@ -231,7 +248,7 @@ function handleDeath(serpent, killer) {
     }
 
     setTimeout(() => {
-      showResults(false, playerStats);
+      showResults(false, { ...playerStats, total: TOTAL_SERPENTS });
       gameState = STATE.GAMEOVER;
     }, 2000);
   }
@@ -257,7 +274,7 @@ function checkWinCondition() {
       showAliveBanner('YOU WIN!');
       gameState = STATE.DEAD; // prevent re-trigger
       setTimeout(() => {
-        showResults(true, playerStats);
+        showResults(true, { ...playerStats, timeSurvived: matchTime, total: TOTAL_SERPENTS });
         gameState = STATE.GAMEOVER;
       }, 2500);
     } else if (gameState === STATE.PLAYING) {
@@ -330,10 +347,19 @@ function updateGame(dt) {
   }
   serpentManager.updateBots(dt, orbManager, zoneManager);
 
+  // ── Circular boundary kill ──
+  for (const s of serpentManager.serpents) {
+    if (!s.alive) continue;
+    const r2 = s.headPos.x * s.headPos.x + s.headPos.z * s.headPos.z;
+    if (r2 > ARENA_RADIUS * ARENA_RADIUS) {
+      handleDeath(s, null);
+    }
+  }
+
   // ── Orb collection ──
   const orbEvents = orbManager.checkCollection(serpentManager.serpents);
   for (const ev of orbEvents) {
-    serpentManager.growSerpent(ev.serpent, 1);
+    serpentManager.growSerpent(ev.serpent, ev.mass || 1);
     if (ev.serpent.isPlayer) Audio.orbPickup();
   }
 
@@ -381,7 +407,7 @@ function updateGame(dt) {
 
   // ── Render ──
   serpentManager.render();
-  orbManager.update(globalTime);
+  orbManager.update(globalTime, serpentManager.serpents);
 
   // ── Camera — always update (handles dead/orbit mode internally) ──
   cameraController.update(player, dt);

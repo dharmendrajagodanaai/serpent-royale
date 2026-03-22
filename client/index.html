@@ -204,8 +204,11 @@
       font-size: 16px; line-height: 2;
       text-align: center; color: rgba(255,255,255,0.8);
     }
-    #play-again-btn {
+    .results-btn-row {
+      display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
       margin-top: 10px;
+    }
+    #play-again-btn {
       padding: 14px 50px; font-size: 18px; font-weight: bold;
       background: linear-gradient(135deg, #00ffcc, #00aaff);
       color: #000; border: none; border-radius: 8px;
@@ -214,6 +217,15 @@
       box-shadow: 0 0 20px rgba(0,255,200,0.4);
     }
     #play-again-btn:hover { box-shadow: 0 0 40px rgba(0,255,200,0.6); }
+    #results-share-btn {
+      padding: 14px 28px; font-size: 15px; font-weight: bold;
+      background: transparent;
+      color: #00ffcc; border: 2px solid #00ffcc; border-radius: 8px;
+      cursor: pointer; pointer-events: all;
+      letter-spacing: 2px; text-transform: uppercase;
+      transition: background 0.2s;
+    }
+    #results-share-btn:hover { background: rgba(0,255,200,0.12); }
 
     /* Alive banner */
     #alive-banner {
@@ -237,7 +249,7 @@
       <span class="ctrl-key">MOUSE</span><span>Steer serpent</span>
       <span class="ctrl-key">W / CLICK</span><span>Speed boost (drains length)</span>
       <span class="ctrl-key">SPACE</span><span>U-turn</span>
-      <span class="ctrl-key">TAB</span><span>Scoreboard</span>
+      <span class="ctrl-key">SCROLL</span><span>Zoom in/out</span>
     </div>
     <button id="play-btn">PLAY</button>
   </div>
@@ -295,7 +307,10 @@
   <div id="results-screen">
     <div id="results-title">VICTORY</div>
     <div id="results-stats"></div>
-    <button id="play-again-btn">PLAY AGAIN</button>
+    <div class="results-btn-row">
+      <button id="play-again-btn">PLAY AGAIN</button>
+      <button id="results-share-btn">Share Score</button>
+    </div>
   </div>
 
   <script type="module" src="./main.js"></script>

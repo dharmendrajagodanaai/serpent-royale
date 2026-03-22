@@ -3,15 +3,19 @@ import { getTerrainHeight } from './terrain.js';
 
 export const SERPENT_COLORS = [
   0x00ffcc, // player - cyan
-  0xff4444, // red
-  0x44ff44, // green
-  0x4488ff, // blue
-  0xff8800, // orange
-  0xcc44ff, // purple
-  0xffff00, // yellow
-  0xff44aa, // pink
+  0xff4444, 0x44ff44, 0x4488ff, 0xff8800, 0xcc44ff, 0xffff00, 0xff44aa,
+  0x00ccff, 0xff0088, 0x88ff00, 0xff6600, 0x0088cc, 0xcc8800,
+  0xff0000, 0x00ff88, 0x8800cc, 0xffaa00, 0x00ffff, 0xff8844, 0x44aaff,
 ];
 
+const BOT_NAMES = [
+  'Viper', 'Mamba', 'Cobra', 'Python', 'Anaconda', 'Asp', 'Boa',
+  'Taipan', 'Adder', 'Krait', 'Rattler', 'Copperhead', 'Bushmaster',
+  'Cottonmouth', 'Sidewinder', 'Diamondback', 'Kingsnake', 'Fer-de-Lance',
+  'Puff Adder', 'Boomslang',
+];
+
+export const TOTAL_SERPENTS = 20; // 1 player + 19 bots
 const BASE_SPEED = 6;
 const BOOST_SPEED = 12;
 const TURN_SPEED = 2.8;
@@ -20,7 +24,7 @@ const START_SEGMENTS = 5;
 const MAX_SEGMENTS = 100;
 const PATH_MAX = 3000;
 const AI_TURN_SPEED = 2.2;
-const MAX_TOTAL_SEGS = 800; // 8 × 100
+const MAX_TOTAL_SEGS = TOTAL_SERPENTS * MAX_SEGMENTS;
 
 // ─── SerpentPath ────────────────────────────────────────────────────────────
 
@@ -164,20 +168,19 @@ export class SerpentManager {
     this.headLights = [];
     const headGeo = new THREE.SphereGeometry(0.55, 10, 8);
 
-    for (let i = 0; i < 8; i++) {
-      const col = new THREE.Color(SERPENT_COLORS[i]);
+    for (let i = 0; i < TOTAL_SERPENTS; i++) {
+      const col = new THREE.Color(SERPENT_COLORS[i % SERPENT_COLORS.length]);
       const mat = new THREE.MeshStandardMaterial({
         color: col, emissive: col, emissiveIntensity: 0.6,
         roughness: 0.2, metalness: 0.6
       });
       const mesh = new THREE.Mesh(headGeo, mat);
       mesh.visible = false;
-      mesh.frustumCulled = false; // heads move across map; prevent culling at edge positions
+      mesh.frustumCulled = false;
       this.scene.add(mesh);
       this.headMeshes.push(mesh);
 
-      // Point light on each head
-      const light = new THREE.PointLight(SERPENT_COLORS[i], 1.2, 8);
+      const light = new THREE.PointLight(SERPENT_COLORS[i % SERPENT_COLORS.length], 1.2, 8);
       light.visible = false;
       this.scene.add(light);
       this.headLights.push(light);
@@ -186,15 +189,17 @@ export class SerpentManager {
 
   spawnSerpents(playerIndex = 0) {
     this.serpents = [];
-    const count = 8;
+    const count = TOTAL_SERPENTS;
+    this._botWanderTime = [];
 
     for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2;
-      const r = 60 + Math.random() * 30;
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.3;
+      const r = 55 + Math.random() * 30;
       const x = Math.cos(angle) * r;
       const z = Math.sin(angle) * r;
       const dirAngle = angle + Math.PI; // Face center
       const dirX = Math.cos(dirAngle), dirZ = Math.sin(dirAngle);
+      const colorIdx = i % SERPENT_COLORS.length;
 
       const serpent = {
         id: i,
@@ -203,17 +208,18 @@ export class SerpentManager {
         segmentCount: START_SEGMENTS,
         headPos: { x, z },
         headDir: { x: dirX, z: dirZ },
-        color: new THREE.Color(SERPENT_COLORS[i]),
+        color: new THREE.Color(SERPENT_COLORS[colorIdx]),
         alive: true,
         boosting: false,
         boostDrainTimer: 0,
         zoneDamageTimer: 0,
-        name: i === playerIndex ? 'YOU' : `BOT-${i}`,
+        name: i === playerIndex ? 'YOU' : (BOT_NAMES[i - 1] || `BOT-${i}`),
         kills: 0,
         // AI state
         wanderAngle: Math.random() * Math.PI * 2,
         wanderTimer: 0,
         targetOrb: null,
+        aggression: Math.random(), // 0 = defensive, 1 = aggressive
       };
 
       this.serpents.push(serpent);
@@ -261,10 +267,54 @@ export class SerpentManager {
 
       let targetX = s.headDir.x;
       let targetZ = s.headDir.z;
+      let wantsBoost = false;
 
-      // Find nearest orb
+      // ── Flee from much-larger threats (scales with player size) ──
+      let fleeing = false;
+      for (const threat of this.serpents) {
+        if (threat === s || !threat.alive) continue;
+        const sizeRatio = threat.segmentCount / Math.max(1, s.segmentCount);
+        if (sizeRatio < 1.4) continue; // only flee from clearly bigger
+        const dx = s.headPos.x - threat.headPos.x;
+        const dz = s.headPos.z - threat.headPos.z;
+        const d2 = dx * dx + dz * dz;
+        const fleeR = 12 + s.segmentCount * 0.2;
+        if (d2 < fleeR * fleeR) {
+          const d = Math.sqrt(d2) + 0.001;
+          targetX = dx / d;
+          targetZ = dz / d;
+          wantsBoost = true; // boost to escape
+          fleeing = true;
+          break;
+        }
+      }
+
+      // ── Aggressive: large bots cut off or chase smaller serpents ──
+      if (!fleeing && s.aggression > 0.5 && s.segmentCount > 18) {
+        let bestTarget = null, bestDist = 22;
+        for (const target of this.serpents) {
+          if (target === s || !target.alive) continue;
+          if (target.segmentCount >= s.segmentCount * 0.9) continue; // only chase smaller
+          const dx = target.headPos.x - s.headPos.x;
+          const dz = target.headPos.z - s.headPos.z;
+          const d = Math.sqrt(dx * dx + dz * dz);
+          if (d < bestDist) { bestDist = d; bestTarget = target; }
+        }
+        if (bestTarget) {
+          // Intercept: aim ahead of target
+          const ahead = 8 + s.segmentCount * 0.2;
+          const ix = bestTarget.headPos.x + bestTarget.headDir.x * ahead;
+          const iz = bestTarget.headPos.z + bestTarget.headDir.z * ahead;
+          const dx = ix - s.headPos.x, dz = iz - s.headPos.z;
+          const d = Math.sqrt(dx * dx + dz * dz) + 0.001;
+          targetX = dx / d; targetZ = dz / d;
+          wantsBoost = bestDist < 14 && s.aggression > 0.65;
+        }
+      }
+
+      // Find nearest orb (include chase orbs)
       let orbWeight = 0;
-      if (orbManager) {
+      if (!fleeing && orbManager) {
         const nearestOrb = orbManager.findNearest(s.headPos.x, s.headPos.z, 40);
         if (nearestOrb) {
           const dx = nearestOrb.x - s.headPos.x;
@@ -285,8 +335,8 @@ export class SerpentManager {
       const wz = Math.sin(s.wanderAngle);
 
       // Blend orb-seek and wander
-      let blendX = wx * (1 - orbWeight) + targetX * orbWeight;
-      let blendZ = wz * (1 - orbWeight) + targetZ * orbWeight;
+      let blendX = fleeing ? targetX : wx * (1 - orbWeight) + targetX * orbWeight;
+      let blendZ = fleeing ? targetZ : wz * (1 - orbWeight) + targetZ * orbWeight;
 
       // Zone avoidance
       if (zoneManager) {
@@ -298,58 +348,75 @@ export class SerpentManager {
           const cz = -s.headPos.z / (r + 0.001);
           blendX = blendX * (1 - weight * 0.8) + cx * weight * 0.8;
           blendZ = blendZ * (1 - weight * 0.8) + cz * weight * 0.8;
+          if (weight > 0.5) wantsBoost = true;
         }
       }
 
       // Body collision avoidance — steer away from nearby serpent segments
-      let avoidX = 0, avoidZ = 0;
-      for (const other of this.serpents) {
-        if (!other.alive) continue;
-        const segs = other.path.segmentPositions;
-        if (!segs || segs.length === 0) continue;
-        // Skip own segments near head; for others check first 12
-        const startSeg = other === s ? 4 : 0;
-        const checkCount = Math.min(other.segmentCount, 12);
-        for (let si = startSeg; si < checkCount; si++) {
-          const seg = segs[si];
-          if (!seg) continue;
-          const adx = s.headPos.x - seg.x;
-          const adz = s.headPos.z - seg.z;
-          const d2 = adx * adx + adz * adz;
-          if (d2 < 16 && d2 > 0.01) { // 4-unit detection radius
-            const d = Math.sqrt(d2);
-            const w = 1 - d / 4;
-            avoidX += (adx / d) * w;
-            avoidZ += (adz / d) * w;
+      if (!fleeing) {
+        let avoidX = 0, avoidZ = 0;
+        for (const other of this.serpents) {
+          if (!other.alive) continue;
+          const segs = other.path.segmentPositions;
+          if (!segs || segs.length === 0) continue;
+          const startSeg = other === s ? 4 : 0;
+          const checkCount = Math.min(other.segmentCount, 12);
+          for (let si = startSeg; si < checkCount; si++) {
+            const seg = segs[si];
+            if (!seg) continue;
+            const adx = s.headPos.x - seg.x;
+            const adz = s.headPos.z - seg.z;
+            const d2 = adx * adx + adz * adz;
+            if (d2 < 16 && d2 > 0.01) {
+              const d = Math.sqrt(d2);
+              const w = 1 - d / 4;
+              avoidX += (adx / d) * w;
+              avoidZ += (adz / d) * w;
+            }
           }
         }
-      }
-      if (avoidX !== 0 || avoidZ !== 0) {
-        const avoidMag = Math.sqrt(avoidX * avoidX + avoidZ * avoidZ);
-        if (avoidMag > 0.001) {
-          const anx = avoidX / avoidMag, anz = avoidZ / avoidMag;
-          const strength = Math.min(1, avoidMag * 0.35) * 0.65;
-          blendX = blendX * (1 - strength) + anx * strength;
-          blendZ = blendZ * (1 - strength) + anz * strength;
+        if (avoidX !== 0 || avoidZ !== 0) {
+          const avoidMag = Math.sqrt(avoidX * avoidX + avoidZ * avoidZ);
+          if (avoidMag > 0.001) {
+            const anx = avoidX / avoidMag, anz = avoidZ / avoidMag;
+            const strength = Math.min(1, avoidMag * 0.35) * 0.65;
+            blendX = blendX * (1 - strength) + anx * strength;
+            blendZ = blendZ * (1 - strength) + anz * strength;
+          }
         }
       }
 
       // Normalize
-      const len = Math.sqrt(blendX * blendX + blendZ * blendZ);
-      if (len > 0.001) { blendX /= len; blendZ /= len; }
+      const blen = Math.sqrt(blendX * blendX + blendZ * blendZ);
+      if (blen > 0.001) { blendX /= blen; blendZ /= blen; }
 
       // Smooth turn (bots turn slower)
       const curAngle = Math.atan2(s.headDir.z, s.headDir.x);
       const tgtAngle = Math.atan2(blendZ, blendX);
-      let d = tgtAngle - curAngle;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
+      let da = tgtAngle - curAngle;
+      while (da > Math.PI) da -= Math.PI * 2;
+      while (da < -Math.PI) da += Math.PI * 2;
       const maxT = AI_TURN_SPEED * dt;
-      const newAngle = curAngle + Math.sign(d) * Math.min(Math.abs(d), maxT);
+      const newAngle = curAngle + Math.sign(da) * Math.min(Math.abs(da), maxT);
       s.headDir.x = Math.cos(newAngle);
       s.headDir.z = Math.sin(newAngle);
 
-      s.path.update(s.headDir.x, s.headDir.z, BASE_SPEED, dt);
+      // Apply boost with segment drain
+      const canBoost = wantsBoost && s.segmentCount > 5;
+      s.boosting = canBoost;
+      const speed = canBoost ? BOOST_SPEED : BASE_SPEED;
+      if (canBoost) {
+        s.boostDrainTimer += dt;
+        if (s.boostDrainTimer >= 1.5) { // bots drain slower than player
+          s.segmentCount = Math.max(3, s.segmentCount - 1);
+          s.boostDrainTimer -= 1.5;
+          s.path.trimToLength(s.segmentCount);
+        }
+      } else {
+        s.boostDrainTimer = 0;
+      }
+
+      s.path.update(s.headDir.x, s.headDir.z, speed, dt);
       s.headPos.x = s.path.headPos.x;
       s.headPos.z = s.path.headPos.z;
       s.headDir.x = s.path.headDir.x;
