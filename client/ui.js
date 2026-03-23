@@ -225,11 +225,31 @@ export function showResults(won, stats) {
   title.style.color = won ? '#ffcc00' : '#ff4444';
   title.style.textShadow = won ? '0 0 30px #ffcc00, 0 0 60px #ff8800' : '0 0 20px #ff4444';
 
+  const total = stats.total || 20;
+  const t = stats.timeSurvived || 0;
+  const min = Math.floor(t / 60);
+  const sec = Math.floor(t % 60);
+  const timeStr = `${min}:${sec.toString().padStart(2, '0')}`;
+
   statsEl.innerHTML = `
     <div>Kills: <strong style="color:#00ffcc">${stats.kills}</strong></div>
     <div>Max Length: <strong style="color:#00ffcc">${stats.maxLength}</strong></div>
-    <div>Placement: <strong style="color:#ffcc00">${stats.placement}</strong> / 8</div>
+    <div>Placement: <strong style="color:#ffcc00">${stats.placement}</strong> / ${total}</div>
+    <div>Time Survived: <strong style="color:#00ffcc">${timeStr}</strong></div>
   `;
+
+  // Attach share button handler
+  const shareBtn = document.getElementById('results-share-btn');
+  if (shareBtn) {
+    shareBtn.onclick = () => {
+      const text = `I ${won ? 'won' : 'survived ' + timeStr + ' in'} Serpent Royale! ` +
+        `Length: ${stats.maxLength}, Kills: ${stats.kills}, Placement: ${stats.placement}/${total} 🐍`;
+      navigator.clipboard?.writeText(text).then(() => {
+        shareBtn.textContent = 'Copied!';
+        setTimeout(() => { shareBtn.textContent = 'Share Score'; }, 2000);
+      });
+    };
+  }
 }
 
 export function showDamageOverlay(intensity) {

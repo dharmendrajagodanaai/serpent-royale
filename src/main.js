@@ -4,7 +4,7 @@ import { Terrain }         from './terrain.js';
 import { SerpentManager }  from './serpent.js';
 import { OrbSystem }       from './orbs.js';
 import { PowerupSystem }   from './powerups.js';
-import { ZoneManager }     from './zone.js';
+import { BoundaryManager }  from './boundary.js';
 import { CollisionSystem } from './collision.js';
 import { AIController }    from './ai.js';
 import { CameraController } from './camera.js';
@@ -13,22 +13,30 @@ import { AudioManager }    from './audio.js';
 import { UIManager }       from './ui.js';
 
 import {
-  ARENA_HALF, AI_COUNT, SERPENT_COLORS,
+  ARENA_HALF, ARENA_RADIUS, AI_COUNT,
   GAME_STATE, LOBBY_COUNTDOWN, RESULTS_DURATION,
-  BOOST_DRAIN_RATE, ZONE_DRAIN_RATE,
+  BOOST_DRAIN_RATE,
   HEAD_RADIUS, START_SEGMENTS,
-  POWERUP_TYPES,
+  POWERUP_TYPES, CHASE_ORB_MASS, DEATH_ORB_MASS,
 } from './constants.js';
+import { SKINS, getSkinById, getRandomSkin, DEFAULT_SKIN_ID, skinToCssGradient } from './skins.js';
+
+// Zone system removed — using fixed circular boundary instead
 
 // ─── Bot names ────────────────────────────────────────────────────────────────
 
-const BOT_NAMES = ['Viper', 'Mamba', 'Cobra', 'Python', 'Anaconda', 'Asp', 'Boa'];
+const BOT_NAMES = [
+  'Viper', 'Mamba', 'Cobra', 'Python', 'Anaconda', 'Asp', 'Boa',
+  'Taipan', 'Adder', 'Krait', 'Rattler', 'Copperhead', 'Bushmaster',
+  'Cottonmouth', 'Sidewinder', 'Diamondback', 'Kingsnake', 'Fer-de-Lance',
+  'Puff Adder', 'Boomslang',
+];
 
 // ─── Spawn positions ─────────────────────────────────────────────────────────
 
-function randomSpawn(radius = 70) {
+function randomSpawn(radius = 150) {
   const angle = Math.random() * Math.PI * 2;
-  const r = radius * (0.4 + Math.random() * 0.6);
+  const r = radius * (0.3 + Math.random() * 0.7);
   return {
     x: Math.cos(angle) * r,
     z: Math.sin(angle) * r,
@@ -72,7 +80,7 @@ class Game {
 
     // ── Subsystems ────────────────────────────────────────────────────────
     this.terrain   = new Terrain(this.scene);
-    this.zone      = new ZoneManager(this.scene);
+    this.boundary  = new BoundaryManager(this.scene);
     this.orbSystem = new OrbSystem(this.scene, this.terrain);
     this.powerups  = new PowerupSystem();
     this.collision = new CollisionSystem();
@@ -86,14 +94,14 @@ class Game {
     this.state        = GAME_STATE.LOBBY;
     this.playerIdx    = -1;
     this.playerName   = 'Player';
-    this.selectedColor = SERPENT_COLORS[0]; // player-chosen color
+    this.selectedSkin = getSkinById(localStorage.getItem('serpent-skin') || DEFAULT_SKIN_ID);
     this.boostLength  = 1.0; // 0–1 fraction
     this.boostOrbTimer = 0;  // seconds since last boost orb drop (player)
     this.kills        = 0;
+    this.playerSurvivalTime = 0;
     this.aiControllers = [];
     this.gameTimer    = 0;
     this.encircTimer  = 0;
-    this.zoneTimer    = 0;
     this.lobbyTimer   = 0;
     this.countdownNum = 3;
     this.countdownTimer = 0;
@@ -141,16 +149,8 @@ class Game {
       });
     }
 
-    // Color swatch selection
-    const swatches = document.querySelectorAll('.color-swatch');
-    swatches.forEach((swatch) => {
-      swatch.addEventListener('click', () => {
-        const hex = parseInt(swatch.dataset.color, 16);
-        this.selectedColor = hex;
-        swatches.forEach(s => s.classList.remove('selected'));
-        swatch.classList.add('selected');
-      });
-    });
+    // Skin selector
+    this._buildSkinSelector();
 
     // ── Start loop ────────────────────────────────────────────────────────
     this.clock = new THREE.Clock();
@@ -194,6 +194,47 @@ class Game {
     }, { passive: true });
   }
 
+  // ─── Skin selector ───────────────────────────────────────────────────────
+
+  _buildSkinSelector() {
+    const container = document.getElementById('skin-selector-container');
+    if (!container) return;
+
+    // Group skins by category
+    const categories = {};
+    for (const skin of SKINS) {
+      if (!categories[skin.category]) categories[skin.category] = [];
+      categories[skin.category].push(skin);
+    }
+
+    let html = '<div class="skin-selector-title">Skin:</div><div class="skin-selector-scroll">';
+    for (const [cat, skins] of Object.entries(categories)) {
+      html += `<div class="skin-cat-group">
+        <div class="skin-cat-label">${cat}</div>
+        <div class="skin-cat-row">`;
+      for (const skin of skins) {
+        const bg       = skinToCssGradient(skin);
+        const selected = skin.id === this.selectedSkin.id ? ' selected' : '';
+        html += `<div class="skin-card${selected}" data-skin-id="${skin.id}">
+          <div class="skin-pill" style="background:${bg};"></div>
+          <div class="skin-card-name">${skin.name}</div>
+        </div>`;
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+
+    container.addEventListener('click', (e) => {
+      const card = e.target.closest('.skin-card');
+      if (!card) return;
+      this.selectedSkin = getSkinById(card.dataset.skinId);
+      localStorage.setItem('serpent-skin', this.selectedSkin.id);
+      container.querySelectorAll('.skin-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    });
+  }
+
   // ─── Match setup ─────────────────────────────────────────────────────────
 
   _startCountdown() {
@@ -225,32 +266,28 @@ class Game {
     this.serpentMeta   = [];
     this.deadSerpents  = [];
     this.kills         = 0;
+    this.playerSurvivalTime = 0;
     this.boostLength   = 1.0;
     this.boostOrbTimer = 0;
     this.gameTimer     = 0;
 
-    // Spawn player with selected color
+    // Spawn player with selected skin
     const ps = randomSpawn(65);
-    this.playerIdx = this.serpMgr.addSerpent(ps.x, ps.z, ps.dir, this.selectedColor, true);
+    this.playerIdx = this.serpMgr.addSerpent(ps.x, ps.z, ps.dir, this.selectedSkin, true);
     this.serpentMeta.push({ name: this.playerName, isPlayer: true, kills: 0, maxSegs: START_SEGMENTS });
 
-    // Spawn AI bots — skip selected color to avoid duplicates if possible
+    // Spawn AI bots with random skins
     for (let i = 0; i < AI_COUNT; i++) {
-      const sp = randomSpawn(65);
-      // Pick a color different from the player's selected color
-      let colorIdx = (i + 1) % SERPENT_COLORS.length;
-      if (SERPENT_COLORS[colorIdx] === this.selectedColor) {
-        colorIdx = (colorIdx + 1) % SERPENT_COLORS.length;
-      }
-      const idx = this.serpMgr.addSerpent(sp.x, sp.z, sp.dir, SERPENT_COLORS[colorIdx], false);
+      const sp      = randomSpawn(65);
+      const botSkin = getRandomSkin();
+      const idx     = this.serpMgr.addSerpent(sp.x, sp.z, sp.dir, botSkin, false);
       this.serpentMeta.push({ name: BOT_NAMES[i], isPlayer: false, kills: 0, maxSegs: START_SEGMENTS });
       this.aiControllers.push(new AIController(idx));
     }
 
     this.aliveSerpents = this.serpMgr.serpents.map((_, i) => i);
 
-    // Reset zone
-    this.zone.start();
+    // Boundary is fixed — no reset needed
 
     // Update lobby player list
     const names  = this.serpentMeta.map(m => m.name);
@@ -359,11 +396,11 @@ class Game {
         this.boostOrbTimer += dt;
         if (this.boostOrbTimer >= 0.3 && player.path.segmentCount > 5) {
           this.boostOrbTimer = 0;
-          // Drop orb at tail position
+          // Drop orb at tail position (boost trail = regular small orbs)
           const tailV = new THREE.Vector3();
           const tailIdx = Math.max(0, Math.floor(player.path.segmentCount) - 1);
           player.path.getSegmentPos(tailIdx, this.terrain, tailV);
-          this.orbSystem.spawnDeathOrbs(tailV.x, tailV.z, 1);
+          this.orbSystem.spawnBoostOrbs(tailV.x, tailV.z, 1);
           player.path.shrink(1);
         }
       } else {
@@ -380,11 +417,12 @@ class Game {
       this.audio.setAmbientSpeed(player.path.boost ? 12 : 7);
     }
 
-    // ── AI updates ────────────────────────────────────────────────────
+    // ── AI updates (difficulty scales with player size) ─────────────
+    const playerSegs = player.path.alive ? player.path.segmentCount : START_SEGMENTS;
     for (const ai of this.aiControllers) {
       const s = this.serpMgr.serpents[ai.serpentIdx];
       if (!s || !s.path.alive) continue;
-      const angle = ai.update(s, this.serpMgr.serpents, this.orbSystem, this.zone, dt);
+      const angle = ai.update(s, this.serpMgr.serpents, this.orbSystem, this.boundary, dt, playerSegs);
 
       // AI boosts based on personality-driven wantsBoost flag or random chance
       const aiBoost = ai.wantsBoost || Math.random() < 0.01;
@@ -392,40 +430,32 @@ class Game {
       if (aiBoost && s.path.segmentCount > 5) {
         s.path.segmentCount = Math.max(2, s.path.segmentCount - dt * BOOST_DRAIN_RATE);
 
-        // AI also drops orbs when boosting
+        // AI also drops orbs when boosting (boost trail = regular small orbs)
         ai.boostOrbTimer += dt;
         if (ai.boostOrbTimer >= 0.3) {
           ai.boostOrbTimer = 0;
           const tailV = new THREE.Vector3();
           const tailIdx = Math.max(0, Math.floor(s.path.segmentCount) - 1);
           s.path.getSegmentPos(tailIdx, this.terrain, tailV);
-          this.orbSystem.spawnDeathOrbs(tailV.x, tailV.z, 1);
+          this.orbSystem.spawnBoostOrbs(tailV.x, tailV.z, 1);
         }
       } else {
         ai.boostOrbTimer = 0;
       }
     }
 
-    // ── Zone damage ───────────────────────────────────────────────────
-    this.zone.update(dt);
-    this.zoneTimer += dt;
-
+    // ── Circular boundary (hard kill, separate from zone) ─────────────
     for (let i = 0; i < this.serpMgr.serpents.length; i++) {
       const s = this.serpMgr.serpents[i];
       if (!s.path.alive) continue;
       const hx = s.path.headPos.x, hz = s.path.headPos.z;
-      if (!this.zone.isInZone(hx, hz)) {
-        s.path.segmentCount -= dt * ZONE_DRAIN_RATE;
-        if (i === this.playerIdx) {
-          this.ui.showZoneWarning(true);
-          if (Math.random() < dt * 4) this.ui.flashDamage();
-          if (Math.random() < dt * 2) this.audio.zoneWarning();
-        }
-        if (s.path.segmentCount < 2) this._killSerpent(i, -1);
-      } else {
-        if (i === this.playerIdx) this.ui.showZoneWarning(false);
+      if (hx * hx + hz * hz > ARENA_RADIUS * ARENA_RADIUS) {
+        this._killSerpent(i, -1);
       }
     }
+
+    // ── Boundary update (visual animation) ──────────────────────────
+    this.boundary.update(dt);
 
     // ── Orb collection ────────────────────────────────────────────────
     for (let i = 0; i < this.serpMgr.serpents.length; i++) {
@@ -436,6 +466,12 @@ class Game {
       for (const c of collected) {
         if (c.type === 'regular') {
           s.path.grow(1);
+          if (i === this.playerIdx) this.audio.orbPickup();
+        } else if (c.type === 'chase') {
+          s.path.grow(CHASE_ORB_MASS);
+          if (i === this.playerIdx) this.audio.orbPickup();
+        } else if (c.type === 'death') {
+          s.path.grow(DEATH_ORB_MASS);
           if (i === this.playerIdx) this.audio.orbPickup();
         } else {
           // Power-up
@@ -483,7 +519,7 @@ class Game {
     this._updateSerpentRendering(dt);
 
     // ── Orb update ────────────────────────────────────────────────────
-    this.orbSystem.update(dt);
+    this.orbSystem.update(dt, this.serpMgr.serpents);
 
     // ── Effects ───────────────────────────────────────────────────────
     this.effects.update(dt);
@@ -504,8 +540,7 @@ class Game {
       this.ui.updatePowerup(this.powerups.getHUDColor(this.playerIdx));
     }
 
-    this.ui.updateZoneTimer(this.zone.getPhaseInfo());
-    this.ui.updateMinimap(this.serpMgr.serpents, this.playerIdx, this.zone.currentRadius, this.orbSystem);
+    this.ui.updateMinimap(this.serpMgr.serpents, this.playerIdx, ARENA_RADIUS, this.orbSystem);
     this.ui.updateLeaderboard(this.serpMgr.serpents, this.serpentMeta, this.playerIdx);
 
     // ── Win condition ─────────────────────────────────────────────────
@@ -540,10 +575,10 @@ class Game {
     const meta = this.serpentMeta[victimIdx];
     if (meta) meta.maxSegs = Math.max(meta.maxSegs || 0, Math.floor(victim.path.segmentCount));
 
-    // Death orb scatter
+    // Death orb scatter — colored by the dead snake for visual hierarchy
     const hp = victim.path.headPos;
     const orbCount = Math.floor(victim.path.segmentCount * 0.7);
-    this.orbSystem.spawnDeathOrbs(hp.x, hp.z, orbCount);
+    this.orbSystem.spawnDeathOrbs(hp.x, hp.z, orbCount, victim.colorHex);
 
     // Death explosion
     this.effects.spawnDeathExplosion(hp.x, hp.y, hp.z, victim.color, Math.min(80, orbCount));
@@ -572,12 +607,12 @@ class Game {
 
     // If player died — show death overlay + killed-by banner
     if (victimIdx === this.playerIdx) {
+      this.playerSurvivalTime = this.gameTimer;
       this.audio.death();
-      this.ui.showZoneWarning(false);
       const killerName = creditorIdx >= 0 && creditorIdx !== victimIdx
         ? this.serpentMeta[creditorIdx]?.name || null
         : null;
-      this.ui.showPlayerDeath(killerName, Math.floor(victim.path.segmentCount), this.kills);
+      this.ui.showPlayerDeath(killerName, Math.floor(victim.path.segmentCount), this.kills, this.playerSurvivalTime);
     }
 
     this.serpMgr.removeSerpent(victimIdx);
@@ -591,6 +626,7 @@ class Game {
       kills: meta?.kills || 0,
       maxSegs: meta?.maxSegs || 0,
       isPlayer: victimIdx === this.playerIdx,
+      survivalTime: this.gameTimer,
     });
   }
 
@@ -610,6 +646,7 @@ class Game {
         kills: meta?.kills || 0,
         maxSegs: Math.max(meta?.maxSegs || 0, Math.floor(s.path.segmentCount)),
         isPlayer: idx === this.playerIdx,
+        survivalTime: this.gameTimer,
       };
     });
 

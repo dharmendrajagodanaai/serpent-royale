@@ -3,7 +3,6 @@ import {
   SERPENT_BASE_SPEED, SERPENT_BOOST_SPEED, SERPENT_TURN_SPEED, SERPENT_BOOST_TURN_SPEED,
   SEGMENT_SPACING, SEGMENT_RADIUS, HEAD_RADIUS,
   START_SEGMENTS, MAX_SEGMENTS, ARENA_HALF,
-  SERPENT_COLORS,
 } from './constants.js';
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
@@ -121,8 +120,9 @@ export class SerpentManager {
     this.terrain = terrain;
     this.serpents = [];
 
-    this._dummy  = new THREE.Object3D();
-    this._tempV  = new THREE.Vector3();
+    this._dummy    = new THREE.Object3D();
+    this._tempV    = new THREE.Vector3();
+    this._segColor = new THREE.Color(); // reused per segment to avoid GC
 
     // Shared InstancedMesh for ALL body segments
     const segGeo = new THREE.SphereGeometry(SEGMENT_RADIUS, 8, 6);
@@ -154,25 +154,26 @@ export class SerpentManager {
     this._trailParticles = [];
   }
 
-  /** Add a serpent and return its index */
-  addSerpent(x, z, dirAngle, colorHex, isPlayer = false) {
-    const path  = new SerpentPath(x, z, dirAngle);
-    const color = new THREE.Color(colorHex);
+  /** Add a serpent and return its index. skin = { id, colors[], ... } */
+  addSerpent(x, z, dirAngle, skin, isPlayer = false) {
+    const path       = new SerpentPath(x, z, dirAngle);
+    const primaryHex = skin.colors[0];
+    const color      = new THREE.Color(primaryHex);
 
     const head = this._createHead(color, isPlayer);
     head.position.set(x, this.terrain.getHeight(x, z) + 0.7, z);
     this.scene.add(head);
 
-    // Point light on head
-    const light = new THREE.PointLight(colorHex, isPlayer ? 2.5 : 1.5, 18);
+    // Point light on head (primary color)
+    const light = new THREE.PointLight(primaryHex, isPlayer ? 2.5 : 1.5, 18);
     head.add(light);
 
-    // Trail particle system
+    // Trail particle system (primary color)
     const trail = this._createTrail(color);
     this.scene.add(trail.points);
 
     const idx = this.serpents.length;
-    this.serpents.push({ path, color, colorHex, isPlayer, head, light, trail, kills: 0 });
+    this.serpents.push({ path, skin, color, colorHex: primaryHex, isPlayer, head, light, trail, kills: 0 });
     this._heads.push(head);
     this._headLights.push(light);
     this._trailParticles.push(trail);
@@ -293,11 +294,13 @@ export class SerpentManager {
         this._dummy.scale.setScalar(scale);
         this._dummy.updateMatrix();
 
+        this._segColor.setHex(s.skin.colors[i % s.skin.colors.length]);
+
         this.bodyMesh.setMatrixAt(instanceIndex, this._dummy.matrix);
-        this.bodyMesh.setColorAt(instanceIndex, s.color);
+        this.bodyMesh.setColorAt(instanceIndex, this._segColor);
 
         this.glowMesh.setMatrixAt(instanceIndex, this._dummy.matrix);
-        this.glowMesh.setColorAt(instanceIndex, s.color);
+        this.glowMesh.setColorAt(instanceIndex, this._segColor);
 
         instanceIndex++;
       }

@@ -10,6 +10,15 @@ export class CameraController {
     this._deathPos = new THREE.Vector3();
     this._deathOrbitAngle = 0;
     this._deadMode = false;
+
+    // Scroll wheel zoom: 0.5x – 2x of base distances
+    this._zoomFactor = 1.0;
+    this._targetZoom = 1.0;
+    window.addEventListener('wheel', e => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.12 : -0.12;
+      this._targetZoom = Math.max(0.5, Math.min(2.0, this._targetZoom + delta));
+    }, { passive: false });
   }
 
   // Called when player dies — begin orbiting around death position
@@ -39,14 +48,18 @@ export class CameraController {
 
     if (!serpent || !serpent.alive) return;
 
+    // Smooth zoom interpolation
+    this._zoomFactor += (this._targetZoom - this._zoomFactor) * Math.min(1, dt * 5);
+    const zoom = this._zoomFactor;
+
     const hx = serpent.headPos.x;
     const hz = serpent.headPos.z;
     const dx = serpent.headDir.x;
     const dz = serpent.headDir.z;
 
-    // Chase camera: behind and above head
-    const backDist = serpent.boosting ? 14 : 11;
-    const heightOff = serpent.boosting ? 9 : 7.5;
+    // Chase camera: behind and above head (scale distances by zoom)
+    const backDist = (serpent.boosting ? 14 : 11) * zoom;
+    const heightOff = (serpent.boosting ? 9 : 7.5) * zoom;
     const lookAheadDist = 5;
 
     const bx = hx - dx * backDist;

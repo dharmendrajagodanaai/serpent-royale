@@ -10,7 +10,11 @@ export const SERPENT_COLORS = [
   0xcc44ff, // purple
   0xffff00, // yellow
   0xff44aa, // pink
+  0x00ccff, 0xff0088, 0x88ff00, 0xff6600, 0x0088cc, 0xcc8800,
+  0xff0000, 0x00ff88, 0x8800cc, 0xffaa00, 0x00ffff, 0xff8844, 0x44aaff,
 ];
+
+export const TOTAL_SERPENTS = 20; // 1 player + 19 bots
 
 const BASE_SPEED = 6;
 const BOOST_SPEED = 12;
@@ -20,10 +24,14 @@ const START_SEGMENTS = 5;
 const MAX_SEGMENTS = 100;
 const PATH_MAX = 3000;
 const AI_TURN_SPEED = 2.2;
-const MAX_TOTAL_SEGS = 800; // 8 × 100
+const MAX_TOTAL_SEGS = TOTAL_SERPENTS * MAX_SEGMENTS;
 
 // Bot personalities distributed across 7 bots (index 1-7)
-const BOT_PERSONALITIES = ['aggressive', 'collector', 'aggressive', 'coiler', 'collector', 'aggressive', 'coiler'];
+const BOT_PERSONALITIES = [
+  'aggressive', 'collector', 'aggressive', 'coiler', 'collector', 'aggressive', 'coiler',
+  'collector', 'aggressive', 'coiler', 'collector', 'aggressive', 'collector', 'coiler',
+  'aggressive', 'collector', 'coiler', 'aggressive', 'collector',
+];
 
 // ─── SerpentPath ────────────────────────────────────────────────────────────
 
@@ -178,8 +186,8 @@ export class SerpentManager {
     const pupilGeo = new THREE.SphereGeometry(0.07, 5, 4);
     const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
 
-    for (let i = 0; i < 8; i++) {
-      const col = new THREE.Color(SERPENT_COLORS[i]);
+    for (let i = 0; i < TOTAL_SERPENTS; i++) {
+      const col = new THREE.Color(SERPENT_COLORS[i % SERPENT_COLORS.length]);
       const mat = new THREE.MeshStandardMaterial({
         color: col, emissive: col, emissiveIntensity: 0.6,
         roughness: 0.2, metalness: 0.6
@@ -209,7 +217,7 @@ export class SerpentManager {
       this.headMeshes.push(mesh);
 
       // Point light on each head
-      const light = new THREE.PointLight(SERPENT_COLORS[i], 1.2, 8);
+      const light = new THREE.PointLight(SERPENT_COLORS[i % SERPENT_COLORS.length], 1.2, 8);
       light.visible = false;
       this.scene.add(light);
       this.headLights.push(light);
@@ -219,7 +227,7 @@ export class SerpentManager {
   // playerColorIndex: which SERPENT_COLORS index the player chose
   spawnSerpents(playerIndex = 0, playerColorIndex = 0) {
     this.serpents = [];
-    const count = 8;
+    const count = TOTAL_SERPENTS;
 
     // Build color assignment: player gets chosen color, bots get the rest
     const colorArray = [...SERPENT_COLORS];

@@ -1,4 +1,4 @@
-import { POWERUP_TYPES, ZONE_PHASES } from './constants.js';
+import { POWERUP_TYPES, ARENA_RADIUS } from './constants.js';
 
 // ─── Kill feed ────────────────────────────────────────────────────────────────
 
@@ -10,9 +10,7 @@ export class UIManager {
     this._aliveCount  = document.getElementById('alive-count');
     this._segCount    = document.getElementById('segment-count');
     this._killCount   = document.getElementById('kill-count');
-    this._zonePhase   = document.getElementById('zone-phase');
-    this._zoneTime    = document.getElementById('zone-time');
-    this._zoneWarning = document.getElementById('zone-warning');
+    // Zone UI removed — boundary is fixed
     this._minimap     = document.getElementById('minimap');
     this._mmCtx       = this._minimap.getContext('2d');
     this._powerupDisp = document.getElementById('powerup-display');
@@ -36,9 +34,27 @@ export class UIManager {
 
     this._killFeedEntries = [];
     this._totalKills  = 0;
+    this._lastDeathStats = null;
 
     this._damageFlashTimer = 0;
     this._killedByTimer    = 0;
+
+    // Share button on death overlay
+    const shareBtn = document.getElementById('death-share');
+    if (shareBtn) {
+      shareBtn.addEventListener('click', () => {
+        const s = this._lastDeathStats;
+        if (!s) return;
+        const min = Math.floor(s.timeSurvived / 60);
+        const sec = Math.floor(s.timeSurvived % 60);
+        const text = `I survived ${min}:${sec.toString().padStart(2, '0')} in Serpent Royale! ` +
+          `Length: ${s.length}, Kills: ${s.kills} 🐍`;
+        navigator.clipboard?.writeText(text).then(() => {
+          shareBtn.textContent = 'Copied!';
+          setTimeout(() => { shareBtn.textContent = 'Share Score'; }, 2000);
+        });
+      });
+    }
 
     // Mobile controls
     this._setupMobileControls();
@@ -86,10 +102,17 @@ export class UIManager {
 
     this._resultsList.innerHTML = results.slice(0, 8).map((r, i) => {
       const isP = r.isPlayer;
+      const colorHex = '#' + (r.colorHex || 0xffffff).toString(16).padStart(6, '0');
+      let timeStr = '';
+      if (r.survivalTime !== undefined) {
+        const min = Math.floor(r.survivalTime / 60);
+        const sec = Math.floor(r.survivalTime % 60);
+        timeStr = ` · ${min}:${sec.toString().padStart(2, '0')}`;
+      }
       return `<div class="result-row ${isP ? 'player-row' : ''}">
         <div class="result-rank">#${i + 1}</div>
-        <div class="result-name" style="color:${r.colorHex}">${r.name}</div>
-        <div class="result-stats">segs: ${r.maxSegs} · kills: ${r.kills}</div>
+        <div class="result-name" style="color:${colorHex}">${r.name}</div>
+        <div class="result-stats">segs: ${r.maxSegs} · kills: ${r.kills}${timeStr}</div>
       </div>`;
     }).join('');
 
@@ -132,27 +155,7 @@ export class UIManager {
     }
   }
 
-  updateZoneTimer(zoneInfo) {
-    const { phase, timeLeft, radius } = zoneInfo;
-    const phases = ZONE_PHASES;
-    const current = phases[phase];
-    if (current) {
-      const nextPhase = phases[phase + 1];
-      if (nextPhase && timeLeft < current.duration) {
-        this._zonePhase.textContent = nextPhase ? `Next: ${nextPhase.size}m` : 'FINAL ZONE';
-      } else {
-        this._zonePhase.textContent = `Zone ${phase + 1} / ${phases.length}`;
-      }
-    }
-    const secs  = Math.max(0, timeLeft);
-    const min   = Math.floor(secs / 60);
-    const sec   = Math.floor(secs % 60);
-    if (this._zoneTime) this._zoneTime.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
-  }
-
-  showZoneWarning(show) {
-    if (this._zoneWarning) this._zoneWarning.style.display = show ? 'block' : 'none';
-  }
+  // Zone timer + warning removed — boundary is fixed circular wall
 
   flashDamage() {
     this._damageFlashTimer = 0.25;
@@ -198,7 +201,7 @@ export class UIManager {
 
   // ─── Minimap ─────────────────────────────────────────────────────────────
 
-  updateMinimap(serpents, playerIdx, zoneRadius, orbSystem) {
+  updateMinimap(serpents, playerIdx, _unused, orbSystem) {
     const ctx  = this._mmCtx;
     const size = 140;
     const half = size / 2;
@@ -221,15 +224,13 @@ export class UIManager {
       ctx.beginPath(); ctx.moveTo(0, gx); ctx.lineTo(size, gx); ctx.stroke();
     }
 
-    // Zone circle
-    const zr = zoneRadius * scale;
-    ctx.strokeStyle = 'rgba(255,60,60,0.7)';
+    // Boundary circle (fixed circular arena edge)
+    const br = ARENA_RADIUS * scale;
+    ctx.strokeStyle = 'rgba(0,180,255,0.7)';
     ctx.lineWidth = 2;
-    ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.arc(half, half, zr, 0, Math.PI * 2);
+    ctx.arc(half, half, br, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.setLineDash([]);
 
     // Orbs (dots)
     if (orbSystem) {
@@ -330,12 +331,17 @@ export class UIManager {
 
   // ─── Death overlay ────────────────────────────────────────────────────────
 
-  showPlayerDeath(killerName, length, kills) {
+  showPlayerDeath(killerName, length, kills, timeSurvived = 0) {
     if (this._deathOverlay) {
       document.getElementById('death-killer').textContent =
-        killerName ? `Killed by ${killerName}` : 'Eliminated by zone';
+        killerName ? `Killed by ${killerName}` : 'Hit the boundary';
       document.getElementById('death-length').textContent = `Length: ${length}`;
       document.getElementById('death-kills').textContent  = `Kills: ${kills}`;
+      const min = Math.floor(timeSurvived / 60);
+      const sec = Math.floor(timeSurvived % 60);
+      const timeEl = document.getElementById('death-time');
+      if (timeEl) timeEl.textContent = `Time: ${min}:${sec.toString().padStart(2, '0')}`;
+      this._lastDeathStats = { length, kills, timeSurvived };
       this._deathOverlay.style.display = 'flex';
     }
     if (killerName && this._killedByBanner) {
