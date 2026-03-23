@@ -86,8 +86,30 @@ export class AIController {
       return this._cachedAngle;
     }
 
-    // ── Priority 3: COIL — if very large and opponent is very close, encircle them ──
-    if (mySize >= 30 && this.aggression > 0.6) {
+    // ── Priority 2.5: flee from significantly larger threats ──
+    for (let si = 0; si < allSerpents.length; si++) {
+      if (si === this.serpentIdx) continue;
+      const threat = allSerpents[si];
+      if (!threat.path.alive) continue;
+      // Only flee from serpents clearly bigger than us (scales with our own size)
+      const sizeRatio = threat.path.segmentCount / Math.max(1, mySize);
+      if (sizeRatio < 1.4) continue;
+      const dx = hx - threat.path.headPos.x;
+      const dz = hz - threat.path.headPos.z;
+      const d = Math.hypot(dx, dz);
+      const fleeRadius = 12 + mySize * 0.2; // larger bots stay scared slightly further
+      if (d < fleeRadius) {
+        this._cachedAngle = Math.atan2(dx, dz);
+        this.wantsBoost = true; // boost to escape large predator
+        this.state = AI_STATES.AVOID_BODY;
+        return this._cachedAngle;
+      }
+    }
+
+    // ── Priority 3: COIL — if large enough and opponent is very close, encircle them ──
+    // Larger/more aggressive bots start coiling at a lower size threshold
+    const coilThreshold = Math.max(20, 30 - Math.floor(this.aggression * 12));
+    if (mySize >= coilThreshold && this.aggression > 0.45) {
       for (let si = 0; si < allSerpents.length; si++) {
         if (si === this.serpentIdx) continue;
         const target = allSerpents[si];
@@ -96,18 +118,22 @@ export class AIController {
         const dx = target.path.headPos.x - hx;
         const dz = target.path.headPos.z - hz;
         const dist = Math.hypot(dx, dz);
-        if (dist < 15) {
-          // Orbit: steer tangentially around the target (perpendicular to vector toward target)
+        // Larger bots extend their coil/trap radius proportionally
+        const coilRange = 15 + (mySize - coilThreshold) * 0.3;
+        if (dist < coilRange) {
           const angleToTarget = Math.atan2(dx, dz);
-          this._cachedAngle = angleToTarget + Math.PI / 2; // tangent
+          this._cachedAngle = angleToTarget + Math.PI / 2; // tangent orbit
           this.state = AI_STATES.COIL;
+          this.wantsBoost = this.aggression > 0.7 && dist > 8;
           return this._cachedAngle;
         }
       }
     }
 
     // ── Priority 4: CHASE_HEAD — if big enough, cut off a smaller opponent ──
-    if (mySize > 20 && this.aggression > 0.4) {
+    // More aggressive / larger bots pursue at lower size thresholds
+    const chaseThreshold = Math.max(15, 20 - Math.floor(this.aggression * 8));
+    if (mySize > chaseThreshold && this.aggression > 0.3) {
       let closestEnemy = null;
       let closestDist  = AI_SEEK_RADIUS * 1.5;
 
@@ -133,15 +159,26 @@ export class AIController {
         const interceptZ = closestEnemy.path.headPos.z + Math.cos(eAngle) * lookAhead;
         this._cachedAngle = Math.atan2(interceptX - hx, interceptZ - hz);
         this.state = AI_STATES.CHASE_HEAD;
-        this.wantsBoost = closestDist < AI_SEEK_RADIUS; // boost when close enough to strike
+        // Bigger/more-aggressive bots boost more freely during the chase
+        const boostRange = AI_SEEK_RADIUS * (0.4 + this.aggression * 0.6);
+        this.wantsBoost = closestDist < boostRange;
         return this._cachedAngle;
       }
     }
 
-    // ── Priority 5: seek nearest orb ──
+    // ── Priority 5: seek nearest orb (prefer chase orbs — 3x value) ──
     if (orbSystem && orbSystem._orbs) {
       let bestDist = AI_SEEK_RADIUS * AI_SEEK_RADIUS;
       let bestOrb  = null;
+      // Check chase orbs first (higher value, smaller effective seek radius is fine)
+      if (orbSystem._chaseOrbs) {
+        for (const o of orbSystem._chaseOrbs) {
+          if (!o.active) continue;
+          const dx = o.x - hx, dz = o.z - hz;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < bestDist) { bestDist = d2; bestOrb = o; }
+        }
+      }
       for (const o of orbSystem._orbs) {
         if (!o.active) continue;
         const dx = o.x - hx, dz = o.z - hz;

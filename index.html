@@ -86,20 +86,6 @@
     .stat-label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
     .stat-value { color: #0ff; font-weight: bold; }
 
-    /* Zone timer */
-    #zone-timer {
-      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-      background: rgba(0,0,0,0.7);
-      border: 1px solid rgba(255,80,80,0.4);
-      border-radius: 6px;
-      padding: 6px 16px;
-      text-align: center;
-      min-width: 180px;
-    }
-    #zone-phase { font-size: 11px; color: #f80; text-transform: uppercase; letter-spacing: 2px; }
-    #zone-time { font-size: 22px; font-weight: bold; color: #ff4444; }
-    #zone-warning { font-size: 11px; color: #f80; display: none; }
-
     /* Minimap */
     #minimap-container {
       position: absolute; bottom: 16px; right: 16px;
@@ -314,8 +300,9 @@
     }
     #death-killer { font-size: 20px; color: #faa; margin-bottom: 8px; }
     #death-length { font-size: 16px; color: #888; margin-bottom: 4px; }
-    #death-kills  { font-size: 16px; color: #888; margin-bottom: 32px; }
-    .death-actions { display: flex; gap: 16px; }
+    #death-kills  { font-size: 16px; color: #888; margin-bottom: 4px; }
+    #death-time   { font-size: 16px; color: #888; margin-bottom: 28px; }
+    .death-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
 
     /* Zone damage flash */
     #damage-overlay {
@@ -402,12 +389,6 @@
       </div>
     </div>
 
-    <div id="zone-timer">
-      <div id="zone-phase">Zone Stable</div>
-      <div id="zone-time">3:00</div>
-      <div id="zone-warning">&#9888; OUTSIDE ZONE</div>
-    </div>
-
     <div id="minimap-container">
       <canvas id="minimap" width="140" height="140"></canvas>
     </div>
@@ -438,9 +419,11 @@
     <div id="death-killer">Killed by ...</div>
     <div id="death-length">Length: 0</div>
     <div id="death-kills">Kills: 0</div>
+    <div id="death-time">Time: 0:00</div>
     <div class="death-actions">
       <button class="btn" id="death-spectate">Spectate</button>
       <button class="btn btn-red" id="death-play-again">Play Again</button>
+      <button class="btn" id="death-share">Share Score</button>
     </div>
   </div>
 
