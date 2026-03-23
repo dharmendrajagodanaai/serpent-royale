@@ -184,21 +184,53 @@
     }
     #player-name-input:focus { border-color: #0ff; }
 
-    /* Color picker swatches */
-    .color-picker-row {
-      display: flex; align-items: center; gap: 10px;
-      margin-bottom: 24px;
+    /* Skin selector */
+    #skin-selector-container {
+      margin-bottom: 20px;
+      width: 380px;
+      max-width: 90vw;
     }
-    .color-picker-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-    .color-swatch {
-      width: 28px; height: 28px; border-radius: 50%;
-      border: 2px solid transparent;
-      cursor: pointer;
-      pointer-events: all;
-      transition: transform 0.15s, border-color 0.15s;
+    .skin-selector-title {
+      font-size: 11px; color: #888;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin-bottom: 8px;
     }
-    .color-swatch:hover   { transform: scale(1.18); }
-    .color-swatch.selected { border-color: #fff; transform: scale(1.18); box-shadow: 0 0 10px currentColor; }
+    .skin-selector-scroll {
+      max-height: 195px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .skin-selector-scroll::-webkit-scrollbar { width: 4px; }
+    .skin-selector-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 2px; }
+    .skin-selector-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+    .skin-cat-group { margin-bottom: 10px; }
+    .skin-cat-label {
+      font-size: 10px; color: #555;
+      text-transform: uppercase; letter-spacing: 2px;
+      margin-bottom: 6px;
+    }
+    .skin-cat-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .skin-card {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      cursor: pointer; pointer-events: all;
+      transition: transform 0.15s;
+    }
+    .skin-card:hover { transform: scale(1.1); }
+    .skin-card.selected .skin-pill {
+      border-color: #fff;
+      box-shadow: 0 0 8px rgba(255,255,255,0.6);
+    }
+    .skin-pill {
+      width: 72px; height: 20px;
+      border-radius: 10px;
+      border: 2px solid rgba(255,255,255,0.15);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .skin-card-name {
+      font-size: 9px; color: #888; text-transform: uppercase; letter-spacing: 1px;
+      max-width: 72px; text-align: center;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
 
     .btn {
       background: transparent;
@@ -434,18 +466,8 @@
     <div class="player-name-row">
       <input type="text" id="player-name-input" placeholder="Your name..." maxlength="16" value="Player" />
     </div>
-    <!-- Color swatch picker -->
-    <div class="color-picker-row">
-      <span class="color-picker-label">Color:</span>
-      <div class="color-swatch selected" style="background:#00ffff;" data-color="0x00ffff"></div>
-      <div class="color-swatch" style="background:#ff2244;" data-color="0xff2244"></div>
-      <div class="color-swatch" style="background:#ff7700;" data-color="0xff7700"></div>
-      <div class="color-swatch" style="background:#ffee00;" data-color="0xffee00"></div>
-      <div class="color-swatch" style="background:#00ff44;" data-color="0x00ff44"></div>
-      <div class="color-swatch" style="background:#4488ff;" data-color="0x4488ff"></div>
-      <div class="color-swatch" style="background:#cc00ff;" data-color="0xcc00ff"></div>
-      <div class="color-swatch" style="background:#ff44aa;" data-color="0xff44aa"></div>
-    </div>
+    <!-- Skin selector (populated by JS) -->
+    <div id="skin-selector-container"></div>
     <div id="lobby-player-list"></div>
     <button class="btn" id="start-btn">Play Now</button>
     <div id="lobby-countdown"></div>

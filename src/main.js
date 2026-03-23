@@ -13,12 +13,13 @@ import { AudioManager }    from './audio.js';
 import { UIManager }       from './ui.js';
 
 import {
-  ARENA_HALF, ARENA_RADIUS, AI_COUNT, SERPENT_COLORS,
+  ARENA_HALF, ARENA_RADIUS, AI_COUNT,
   GAME_STATE, LOBBY_COUNTDOWN, RESULTS_DURATION,
   BOOST_DRAIN_RATE,
   HEAD_RADIUS, START_SEGMENTS,
   POWERUP_TYPES, CHASE_ORB_MASS, DEATH_ORB_MASS,
 } from './constants.js';
+import { SKINS, getSkinById, getRandomSkin, DEFAULT_SKIN_ID, skinToCssGradient } from './skins.js';
 
 // Zone system removed — using fixed circular boundary instead
 
@@ -93,7 +94,7 @@ class Game {
     this.state        = GAME_STATE.LOBBY;
     this.playerIdx    = -1;
     this.playerName   = 'Player';
-    this.selectedColor = SERPENT_COLORS[0]; // player-chosen color
+    this.selectedSkin = getSkinById(localStorage.getItem('serpent-skin') || DEFAULT_SKIN_ID);
     this.boostLength  = 1.0; // 0–1 fraction
     this.boostOrbTimer = 0;  // seconds since last boost orb drop (player)
     this.kills        = 0;
@@ -148,16 +149,8 @@ class Game {
       });
     }
 
-    // Color swatch selection
-    const swatches = document.querySelectorAll('.color-swatch');
-    swatches.forEach((swatch) => {
-      swatch.addEventListener('click', () => {
-        const hex = parseInt(swatch.dataset.color, 16);
-        this.selectedColor = hex;
-        swatches.forEach(s => s.classList.remove('selected'));
-        swatch.classList.add('selected');
-      });
-    });
+    // Skin selector
+    this._buildSkinSelector();
 
     // ── Start loop ────────────────────────────────────────────────────────
     this.clock = new THREE.Clock();
@@ -201,6 +194,47 @@ class Game {
     }, { passive: true });
   }
 
+  // ─── Skin selector ───────────────────────────────────────────────────────
+
+  _buildSkinSelector() {
+    const container = document.getElementById('skin-selector-container');
+    if (!container) return;
+
+    // Group skins by category
+    const categories = {};
+    for (const skin of SKINS) {
+      if (!categories[skin.category]) categories[skin.category] = [];
+      categories[skin.category].push(skin);
+    }
+
+    let html = '<div class="skin-selector-title">Skin:</div><div class="skin-selector-scroll">';
+    for (const [cat, skins] of Object.entries(categories)) {
+      html += `<div class="skin-cat-group">
+        <div class="skin-cat-label">${cat}</div>
+        <div class="skin-cat-row">`;
+      for (const skin of skins) {
+        const bg       = skinToCssGradient(skin);
+        const selected = skin.id === this.selectedSkin.id ? ' selected' : '';
+        html += `<div class="skin-card${selected}" data-skin-id="${skin.id}">
+          <div class="skin-pill" style="background:${bg};"></div>
+          <div class="skin-card-name">${skin.name}</div>
+        </div>`;
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+
+    container.addEventListener('click', (e) => {
+      const card = e.target.closest('.skin-card');
+      if (!card) return;
+      this.selectedSkin = getSkinById(card.dataset.skinId);
+      localStorage.setItem('serpent-skin', this.selectedSkin.id);
+      container.querySelectorAll('.skin-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    });
+  }
+
   // ─── Match setup ─────────────────────────────────────────────────────────
 
   _startCountdown() {
@@ -237,20 +271,16 @@ class Game {
     this.boostOrbTimer = 0;
     this.gameTimer     = 0;
 
-    // Spawn player with selected color
+    // Spawn player with selected skin
     const ps = randomSpawn(65);
-    this.playerIdx = this.serpMgr.addSerpent(ps.x, ps.z, ps.dir, this.selectedColor, true);
+    this.playerIdx = this.serpMgr.addSerpent(ps.x, ps.z, ps.dir, this.selectedSkin, true);
     this.serpentMeta.push({ name: this.playerName, isPlayer: true, kills: 0, maxSegs: START_SEGMENTS });
 
-    // Spawn AI bots — skip selected color to avoid duplicates if possible
+    // Spawn AI bots with random skins
     for (let i = 0; i < AI_COUNT; i++) {
-      const sp = randomSpawn(65);
-      // Pick a color different from the player's selected color
-      let colorIdx = (i + 1) % SERPENT_COLORS.length;
-      if (SERPENT_COLORS[colorIdx] === this.selectedColor) {
-        colorIdx = (colorIdx + 1) % SERPENT_COLORS.length;
-      }
-      const idx = this.serpMgr.addSerpent(sp.x, sp.z, sp.dir, SERPENT_COLORS[colorIdx], false);
+      const sp      = randomSpawn(65);
+      const botSkin = getRandomSkin();
+      const idx     = this.serpMgr.addSerpent(sp.x, sp.z, sp.dir, botSkin, false);
       this.serpentMeta.push({ name: BOT_NAMES[i], isPlayer: false, kills: 0, maxSegs: START_SEGMENTS });
       this.aiControllers.push(new AIController(idx));
     }
@@ -387,11 +417,12 @@ class Game {
       this.audio.setAmbientSpeed(player.path.boost ? 12 : 7);
     }
 
-    // ── AI updates ────────────────────────────────────────────────────
+    // ── AI updates (difficulty scales with player size) ─────────────
+    const playerSegs = player.path.alive ? player.path.segmentCount : START_SEGMENTS;
     for (const ai of this.aiControllers) {
       const s = this.serpMgr.serpents[ai.serpentIdx];
       if (!s || !s.path.alive) continue;
-      const angle = ai.update(s, this.serpMgr.serpents, this.orbSystem, this.boundary, dt);
+      const angle = ai.update(s, this.serpMgr.serpents, this.orbSystem, this.boundary, dt, playerSegs);
 
       // AI boosts based on personality-driven wantsBoost flag or random chance
       const aiBoost = ai.wantsBoost || Math.random() < 0.01;

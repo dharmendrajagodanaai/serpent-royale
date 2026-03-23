@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SERPENT_BASE_SPEED, ARENA_HALF, AI_SEEK_RADIUS, AI_AVOID_RADIUS } from './constants.js';
+import { SERPENT_BASE_SPEED, ARENA_HALF, AI_SEEK_RADIUS, AI_AVOID_RADIUS, START_SEGMENTS, MAX_SEGMENTS } from './constants.js';
 
 const AI_STATES = {
   SEEK_ORB:    'SEEK_ORB',
@@ -10,6 +10,15 @@ const AI_STATES = {
   WANDER:      'WANDER',
 };
 
+// ── Difficulty scaling tiers ─────────────────────────────────────────────────
+// As the player grows, the world gets harder. This maps player size → difficulty
+// multiplier (0 = passive newbie world, 1 = full slither.io aggression).
+function computeDifficultyScale(playerSegments) {
+  // Normalize player size: 0 at start, 1 at ~60% of max
+  const t = Math.max(0, (playerSegments - START_SEGMENTS) / (MAX_SEGMENTS * 0.6 - START_SEGMENTS));
+  return Math.min(1, t);
+}
+
 export class AIController {
   constructor(serpentIdx) {
     this.serpentIdx = serpentIdx;
@@ -19,13 +28,19 @@ export class AIController {
     this.wanderAngle = Math.random() * Math.PI * 2;
     this.stateTimer = 0;
     this.reactionTimer = 0;
-    this.reactionInterval = 0.1 + Math.random() * 0.15; // 100-250ms reaction
+    this._baseReactionInterval = 0.1 + Math.random() * 0.15; // 100-250ms base
+    this.reactionInterval = this._baseReactionInterval;
     this._cachedAngle = Math.random() * Math.PI * 2;
 
-    // Personality: 0 = defensive (flee more), 1 = aggressive (chase more)
-    this.aggression = Math.random();
-    this.wantsBoost = false;    // read by main.js each frame
-    this.boostOrbTimer = 0;     // tracks time since last boost orb drop
+    // Base personality: 0 = defensive, 1 = aggressive
+    // This is the bot's innate tendency — difficulty scaling amplifies it
+    this._baseAggression = Math.random();
+    this.aggression = this._baseAggression;
+    this.wantsBoost = false;
+    this.boostOrbTimer = 0;
+
+    // Behavior role: ~30% of bots are "hunters" who scale up faster
+    this.isHunter = Math.random() < 0.3;
   }
 
   /**
@@ -33,16 +48,29 @@ export class AIController {
    * @param {Object} mySerpent - the serpent object for this AI
    * @param {Array} allSerpents - all serpent objects
    * @param {Object} orbSystem - OrbSystem
-   * @param {Object} zoneManager - ZoneManager
+   * @param {Object} zoneManager - ZoneManager (or boundary)
    * @param {number} dt
+   * @param {number} playerSegments - current player snake segment count
    * @returns {number} desired angle in XZ radians
    */
-  update(mySerpent, allSerpents, orbSystem, zoneManager, dt) {
+  update(mySerpent, allSerpents, orbSystem, zoneManager, dt, playerSegments = START_SEGMENTS) {
     if (!mySerpent.path.alive) return this._cachedAngle;
 
     this.stateTimer  += dt;
     this.reactionTimer += dt;
     this.wantsBoost = false;
+
+    // ── Dynamic difficulty based on player size ──
+    const diff = computeDifficultyScale(playerSegments);
+
+    // Scale aggression: at low difficulty, bots are mostly passive
+    // Hunters ramp up faster than regular bots
+    const hunterBonus = this.isHunter ? 0.25 : 0;
+    this.aggression = Math.min(1, this._baseAggression * (0.3 + diff * 0.7) + diff * hunterBonus);
+
+    // Scale reaction time: faster reactions at higher difficulty
+    // Low diff: 150-350ms, High diff: 80-200ms
+    this.reactionInterval = this._baseReactionInterval * (1.2 - diff * 0.5);
 
     // Only recalculate at reaction interval
     if (this.reactionTimer < this.reactionInterval) return this._cachedAngle;
@@ -63,6 +91,8 @@ export class AIController {
     }
 
     // ── Priority 2: avoid nearby serpent bodies ──
+    // At higher difficulty, bots avoid from further away (better spatial awareness)
+    const effectiveAvoidRadius = AI_AVOID_RADIUS + diff * 3;
     let bestAvoidAngle = null;
     let minBodyDist = Infinity;
     for (let si = 0; si < allSerpents.length; si++) {
@@ -74,7 +104,7 @@ export class AIController {
         other.path.getSegmentPos(i, { getHeight: () => 0 }, sv);
         const dx = hx - sv.x, dz = hz - sv.z;
         const d = Math.hypot(dx, dz);
-        if (d < AI_AVOID_RADIUS && d < minBodyDist) {
+        if (d < effectiveAvoidRadius && d < minBodyDist) {
           minBodyDist = d;
           bestAvoidAngle = Math.atan2(dx, dz);
         }
@@ -87,61 +117,67 @@ export class AIController {
     }
 
     // ── Priority 2.5: flee from significantly larger threats ──
+    // At low difficulty, bots barely flee; at high difficulty, they're smart about it
+    const fleeThresholdRatio = 1.8 - diff * 0.5; // low diff: 1.8x bigger triggers flee; high diff: 1.3x
     for (let si = 0; si < allSerpents.length; si++) {
       if (si === this.serpentIdx) continue;
       const threat = allSerpents[si];
       if (!threat.path.alive) continue;
-      // Only flee from serpents clearly bigger than us (scales with our own size)
       const sizeRatio = threat.path.segmentCount / Math.max(1, mySize);
-      if (sizeRatio < 1.4) continue;
+      if (sizeRatio < fleeThresholdRatio) continue;
       const dx = hx - threat.path.headPos.x;
       const dz = hz - threat.path.headPos.z;
       const d = Math.hypot(dx, dz);
-      const fleeRadius = 12 + mySize * 0.2; // larger bots stay scared slightly further
+      const fleeRadius = 10 + mySize * 0.2 + diff * 5;
       if (d < fleeRadius) {
         this._cachedAngle = Math.atan2(dx, dz);
-        this.wantsBoost = true; // boost to escape large predator
+        this.wantsBoost = diff > 0.3 || this.aggression > 0.5; // smarter flee at higher diff
         this.state = AI_STATES.AVOID_BODY;
         return this._cachedAngle;
       }
     }
 
-    // ── Priority 3: COIL — if large enough and opponent is very close, encircle them ──
-    // Larger/more aggressive bots start coiling at a lower size threshold
-    const coilThreshold = Math.max(20, 30 - Math.floor(this.aggression * 12));
-    if (mySize >= coilThreshold && this.aggression > 0.45) {
+    // ── Priority 3: COIL (encircle smaller opponents) ──
+    // At low difficulty, almost no bots coil. At high difficulty, aggressive bots coil actively.
+    const coilAggressionThreshold = 0.75 - diff * 0.35; // low diff: need 0.75 aggr; high diff: need 0.40
+    const coilSizeThreshold = Math.max(15, 35 - Math.floor(diff * 15 + this.aggression * 8));
+    if (mySize >= coilSizeThreshold && this.aggression > coilAggressionThreshold) {
       for (let si = 0; si < allSerpents.length; si++) {
         if (si === this.serpentIdx) continue;
         const target = allSerpents[si];
         if (!target.path.alive) continue;
-        if (target.path.segmentCount >= mySize) continue; // only coil smaller
+        if (target.path.segmentCount >= mySize) continue;
         const dx = target.path.headPos.x - hx;
         const dz = target.path.headPos.z - hz;
         const dist = Math.hypot(dx, dz);
-        // Larger bots extend their coil/trap radius proportionally
-        const coilRange = 15 + (mySize - coilThreshold) * 0.3;
+        const coilRange = 12 + (mySize - coilSizeThreshold) * 0.3 + diff * 5;
         if (dist < coilRange) {
           const angleToTarget = Math.atan2(dx, dz);
-          this._cachedAngle = angleToTarget + Math.PI / 2; // tangent orbit
+          // Higher difficulty → tighter orbit (closer to perpendicular cutoff)
+          const orbitOffset = (Math.PI / 2) - diff * 0.3;
+          this._cachedAngle = angleToTarget + orbitOffset;
           this.state = AI_STATES.COIL;
-          this.wantsBoost = this.aggression > 0.7 && dist > 8;
+          this.wantsBoost = this.aggression > 0.6 && dist > 6;
           return this._cachedAngle;
         }
       }
     }
 
-    // ── Priority 4: CHASE_HEAD — if big enough, cut off a smaller opponent ──
-    // More aggressive / larger bots pursue at lower size thresholds
-    const chaseThreshold = Math.max(15, 20 - Math.floor(this.aggression * 8));
-    if (mySize > chaseThreshold && this.aggression > 0.3) {
+    // ── Priority 4: CHASE_HEAD (cut off smaller opponents) ──
+    // At low difficulty, only the most aggressive bots chase. At high difficulty, most do.
+    const chaseAggressionThreshold = 0.6 - diff * 0.4; // low diff: need 0.6 aggr; high diff: need 0.2
+    const chaseSizeThreshold = Math.max(10, 25 - Math.floor(diff * 12 + this.aggression * 5));
+    if (mySize > chaseSizeThreshold && this.aggression > chaseAggressionThreshold) {
       let closestEnemy = null;
-      let closestDist  = AI_SEEK_RADIUS * 1.5;
+      let closestDist  = AI_SEEK_RADIUS * (1.0 + diff * 0.8); // larger seek range at higher diff
 
       for (let si = 0; si < allSerpents.length; si++) {
         if (si === this.serpentIdx) continue;
         const target = allSerpents[si];
         if (!target.path.alive) continue;
-        if (target.path.segmentCount >= mySize * 0.9) continue; // only chase clearly smaller
+        // At higher difficulty, bots chase even near-equal size opponents
+        const chaseSizeRatio = 0.9 + diff * 0.08; // low diff: chase < 0.9x; high diff: chase < 0.98x
+        if (target.path.segmentCount >= mySize * chaseSizeRatio) continue;
         const dx = target.path.headPos.x - hx;
         const dz = target.path.headPos.z - hz;
         const dist = Math.hypot(dx, dz);
@@ -152,51 +188,104 @@ export class AIController {
       }
 
       if (closestEnemy) {
-        // Predict intercept: aim ahead of their heading to cut them off
-        const lookAhead = 12 + mySize * 0.3;
+        // Predict intercept: aim ahead of their heading
+        // Higher difficulty → better prediction (longer look-ahead)
+        const lookAhead = 8 + mySize * 0.2 + diff * 8;
         const eAngle = closestEnemy.path.headAngle;
         const interceptX = closestEnemy.path.headPos.x + Math.sin(eAngle) * lookAhead;
         const interceptZ = closestEnemy.path.headPos.z + Math.cos(eAngle) * lookAhead;
         this._cachedAngle = Math.atan2(interceptX - hx, interceptZ - hz);
         this.state = AI_STATES.CHASE_HEAD;
-        // Bigger/more-aggressive bots boost more freely during the chase
-        const boostRange = AI_SEEK_RADIUS * (0.4 + this.aggression * 0.6);
+        const boostRange = AI_SEEK_RADIUS * (0.3 + this.aggression * 0.5 + diff * 0.2);
         this.wantsBoost = closestDist < boostRange;
         return this._cachedAngle;
       }
     }
 
-    // ── Priority 5: seek nearest orb (prefer chase orbs — 3x value) ──
+    // ── Leaderboard hunter behavior ──
+    // Top-3 bots (by size) actively hunt other large snakes when difficulty is moderate+
+    if (diff > 0.35 && this.isHunter && mySize > 30) {
+      let bestTarget = null;
+      let bestScore  = -1;
+      for (let si = 0; si < allSerpents.length; si++) {
+        if (si === this.serpentIdx) continue;
+        const target = allSerpents[si];
+        if (!target.path.alive) continue;
+        // Hunt large snakes (but smaller than us)
+        if (target.path.segmentCount < 25 || target.path.segmentCount >= mySize) continue;
+        const dx = target.path.headPos.x - hx;
+        const dz = target.path.headPos.z - hz;
+        const dist = Math.hypot(dx, dz);
+        if (dist > AI_SEEK_RADIUS * 2) continue;
+        // Score: prefer bigger prey that's closer
+        const score = target.path.segmentCount / (dist + 5);
+        if (score > bestScore) {
+          bestScore  = score;
+          bestTarget = target;
+        }
+      }
+      if (bestTarget) {
+        const lookAhead = 10 + diff * 6;
+        const eAngle = bestTarget.path.headAngle;
+        const interceptX = bestTarget.path.headPos.x + Math.sin(eAngle) * lookAhead;
+        const interceptZ = bestTarget.path.headPos.z + Math.cos(eAngle) * lookAhead;
+        this._cachedAngle = Math.atan2(interceptX - hx, interceptZ - hz);
+        this.state = AI_STATES.CHASE_HEAD;
+        this.wantsBoost = true;
+        return this._cachedAngle;
+      }
+    }
+
+    // ── Priority 5: seek nearest orb (prefer death orbs > chase orbs > normal) ──
     if (orbSystem && orbSystem._orbs) {
       let bestDist = AI_SEEK_RADIUS * AI_SEEK_RADIUS;
       let bestOrb  = null;
-      // Check chase orbs first (higher value, smaller effective seek radius is fine)
-      if (orbSystem._chaseOrbs) {
-        for (const o of orbSystem._chaseOrbs) {
+
+      // At higher difficulty, bots prioritize high-value orbs more effectively
+      // Check death orbs first (highest value)
+      if (orbSystem._deathOrbs) {
+        const deathOrbBonus = 1.0 + diff * 0.5; // scale effective distance for death orbs
+        for (const o of orbSystem._deathOrbs) {
           if (!o.active) continue;
           const dx = o.x - hx, dz = o.z - hz;
-          const d2 = dx * dx + dz * dz;
+          const d2 = (dx * dx + dz * dz) / (deathOrbBonus * deathOrbBonus);
           if (d2 < bestDist) { bestDist = d2; bestOrb = o; }
         }
       }
+
+      // Chase orbs (second priority)
+      if (orbSystem._chaseOrbs) {
+        const chaseOrbBonus = 1.0 + diff * 0.3;
+        for (const o of orbSystem._chaseOrbs) {
+          if (!o.active) continue;
+          const dx = o.x - hx, dz = o.z - hz;
+          const d2 = (dx * dx + dz * dz) / (chaseOrbBonus * chaseOrbBonus);
+          if (d2 < bestDist) { bestDist = d2; bestOrb = o; }
+        }
+      }
+
+      // Regular orbs
       for (const o of orbSystem._orbs) {
         if (!o.active) continue;
         const dx = o.x - hx, dz = o.z - hz;
         const d2 = dx * dx + dz * dz;
         if (d2 < bestDist) { bestDist = d2; bestOrb = o; }
       }
+
       if (bestOrb) {
         this._cachedAngle = Math.atan2(bestOrb.x - hx, bestOrb.z - hz);
         this.state = AI_STATES.SEEK_ORB;
+        // At higher difficulty, bots boost toward high-value orbs
+        if (diff > 0.5 && bestOrb.mass && bestOrb.mass >= 3) {
+          this.wantsBoost = Math.random() < diff * 0.3;
+        }
         return this._cachedAngle;
       }
     }
 
     // ── Priority 6: wander ──
-    // Aggressive bots wander more erratically, defensive bots move smoothly
     const wanderJitter = 0.3 + this.aggression * 0.5;
     this.wanderAngle += (Math.random() - 0.5) * wanderJitter;
-    // Bias toward arena center if drifting too far
     const dist = Math.hypot(hx, hz);
     if (dist > ARENA_HALF * 0.75) {
       const toCenterAngle = Math.atan2(-hx, -hz);
