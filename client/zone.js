@@ -96,6 +96,15 @@ export class ZoneManager {
   get phaseIndex() { return this.currentPhase; }
   get phaseDuration() { return PHASES[this.currentPhase]?.duration ?? 30; }
 
+  // Directly override the current zone size (used in multiplayer mode)
+  setRadius(radius) {
+    this.currentSize = radius * 2;
+    const r = radius;
+    this.wallMesh.scale.set(r, 1, r);
+    this.ringMesh.scale.set(r, 1, r);
+    this.floorMesh.scale.set(r, 1, r);
+  }
+
   isInZone(x, z) {
     const dx = x - this.center.x;
     const dz = z - this.center.z;
