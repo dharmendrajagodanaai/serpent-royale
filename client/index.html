@@ -154,9 +154,12 @@
       font-size: 13px; color: rgba(200,255,255,0.7);
     }
     .ctrl-key { color: #00ffcc; font-weight: bold; }
-    #play-btn {
+    .mode-btns {
+      display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
       margin-top: 10px;
-      padding: 16px 60px; font-size: 22px; font-weight: bold;
+    }
+    #play-btn {
+      padding: 16px 48px; font-size: 20px; font-weight: bold;
       background: linear-gradient(135deg, #00ffcc, #00aaff);
       color: #000; border: none; border-radius: 8px;
       cursor: pointer; pointer-events: all;
@@ -168,6 +171,20 @@
       transform: scale(1.05);
       box-shadow: 0 0 50px rgba(0,255,200,0.6);
     }
+    #mp-btn {
+      padding: 16px 28px; font-size: 18px; font-weight: bold;
+      background: transparent;
+      color: #00ffcc; border: 2px solid #00ffcc; border-radius: 8px;
+      cursor: pointer; pointer-events: all;
+      letter-spacing: 3px; text-transform: uppercase;
+      transition: background 0.15s, transform 0.1s, box-shadow 0.1s;
+    }
+    #mp-btn:hover:not(:disabled) {
+      background: rgba(0,255,200,0.12);
+      transform: scale(1.04);
+      box-shadow: 0 0 30px rgba(0,255,200,0.3);
+    }
+    #mp-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
     /* Countdown */
     #countdown-screen {
@@ -287,7 +304,10 @@
       <span class="ctrl-key">SPACE</span><span>U-turn</span>
       <span class="ctrl-key">SCROLL</span><span>Zoom in/out</span>
     </div>
-    <button id="play-btn">PLAY</button>
+    <div class="mode-btns">
+      <button id="play-btn">SOLO</button>
+      <button id="mp-btn">MULTIPLAYER</button>
+    </div>
   </div>
 
   <!-- Countdown -->

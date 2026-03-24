@@ -235,6 +235,28 @@ export class OrbManager {
     return best;
   }
 
+  /**
+   * Replace orb arrays from server state (multiplayer mode).
+   * orbList: Array of { x, z, active, type, color }
+   *   type: 0=normal, 1=chase, 2=death
+   */
+  applyNetworkOrbs(orbList) {
+    this.orbs = [];
+    this.chaseOrbs = [];
+    for (const o of orbList) {
+      if (!o.active) continue;
+      if (o.type === 1) {
+        this.chaseOrbs.push({ x: o.x, z: o.z, vx: 0, vz: 0, alive: true });
+      } else {
+        this.orbs.push({
+          x: o.x, z: o.z, y: 0, alive: true,
+          bobOffset: Math.abs((o.x * 17 + o.z * 31) % (Math.PI * 2)),
+          color: o.color ?? 0x44ff88,
+        });
+      }
+    }
+  }
+
   update(time, serpents) {
     this._time = time;
     const dummy = this._dummy;

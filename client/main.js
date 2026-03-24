@@ -7,6 +7,7 @@ import { CollisionSystem } from './collision.js';
 import { CameraController } from './camera.js';
 import { buildComposer, ParticleSystem, TrailSystem } from './effects.js';
 import { Audio } from './audio.js';
+import { NetworkManager } from './network.js';
 import {
   addKillFeed, clearKillFeed, updateHUD, updateMinimap, updateLeaderboard,
   showHUD, showCountdown, showStartScreen,
@@ -20,7 +21,7 @@ const STATE = { START: 0, COUNTDOWN: 1, PLAYING: 2, DEAD: 3, GAMEOVER: 4 };
 let gameState = STATE.START;
 let countdownTimer = 0;
 let countdownStep = 3;
-const ARENA_RADIUS = 95; // hard circular kill boundary (separate from battle royale zone)
+const ARENA_RADIUS = 95;
 
 let matchTime = 0;
 let globalTime = 0;
@@ -28,7 +29,15 @@ let playerStats = { kills: 0, maxLength: 5, placement: TOTAL_SERPENTS };
 let damageFlash = 0;
 let zoneWarnCooldown = 0;
 let prevAliveCount = 8;
-let playerOutsideZone = false; // track for damage flash fade rate
+let playerOutsideZone = false;
+
+// ─── Mode ─────────────────────────────────────────────────────────────────────
+
+// 'sp' = single-player (existing local mode), 'mp' = Colyseus multiplayer
+let gameMode = 'sp';
+let networkManager = null;
+// Tracks slots we've already set up head meshes / colours for in MP mode
+const _mpInitializedSlots = new Set();
 
 // ─── Three.js Setup ───────────────────────────────────────────────────────────
 
@@ -94,10 +103,10 @@ function initSystems() {
 }
 
 function resetSystems() {
-  // Remove all current scene children
   while (scene.children.length > 0) scene.remove(scene.children[0]);
   addLights();
-  clearKillFeed(); // BUG 3 fix
+  clearKillFeed();
+  _mpInitializedSlots.clear();
   initSystems();
 }
 
@@ -150,7 +159,7 @@ document.addEventListener('keydown', (e) => {
     Audio.boost();
   }
 
-  if (e.code === 'Space' && gameState === STATE.PLAYING) {
+  if (e.code === 'Space' && gameState === STATE.PLAYING && gameMode === 'sp') {
     const p = serpentManager?.playerSerpent;
     if (p && p.alive) {
       p.path.headDir.x = -p.path.headDir.x;
@@ -202,22 +211,16 @@ function beginMatch() {
 function handleDeath(serpent, killer) {
   if (!serpent.alive) return;
 
-  // Build segment cache for scatter (in case render hasn't run yet this frame)
   serpent.path.buildSegmentCache(serpent.segmentCount);
-
-  // Scatter orbs from this serpent's body
   orbManager.scatter(serpent);
 
-  // Death particles
   particles.spawnExplosion(
     serpent.headPos.x, 0.8, serpent.headPos.z,
     SERPENT_COLORS[serpent.id]
   );
 
-  // Kill the serpent
   serpentManager.killSerpent(serpent);
 
-  // Kill feed
   const killerName = killer?.name ?? null;
   const killerColor = killer ? SERPENT_COLORS[killer.id] : 0xffffff;
   addKillFeed(killerName, serpent.name, killerColor, SERPENT_COLORS[serpent.id]);
@@ -239,10 +242,8 @@ function handleDeath(serpent, killer) {
     playerStats.maxLength = Math.max(playerStats.maxLength, serpent.segmentCount);
     playerStats.timeSurvived = matchTime;
 
-    // BUG 7 fix: orbit camera around death position
     cameraController.setDeathMode(serpent.headPos.x, serpent.headPos.z);
 
-    // Show killer name overlay
     if (killer) {
       showKilledBy(killer.name, SERPENT_COLORS[killer.id]);
     }
@@ -272,7 +273,7 @@ function checkWinCondition() {
       Audio.victory();
       Audio.slitherStop();
       showAliveBanner('YOU WIN!');
-      gameState = STATE.DEAD; // prevent re-trigger
+      gameState = STATE.DEAD;
       setTimeout(() => {
         showResults(true, { ...playerStats, timeSurvived: matchTime, total: TOTAL_SERPENTS });
         gameState = STATE.GAMEOVER;
@@ -283,10 +284,148 @@ function checkWinCondition() {
   }
 }
 
+// ─── Multiplayer helpers ──────────────────────────────────────────────────────
+
+const MP_SLOTS = 8; // server supports 8 concurrent serpents
+
+/**
+ * Apply latest Colyseus room state to the local rendering systems.
+ * Called every frame in MP mode.
+ */
+function applyNetworkStateToScene() {
+  const ns = networkManager?.state;
+  if (!ns) return;
+
+  // Zone radius from server
+  zoneManager.setRadius(ns.zoneRadius);
+
+  // Serpents
+  ns.players.forEach((ps, sessionId) => {
+    const slot = ps.slotIndex;
+    if (slot < 0 || slot >= MP_SLOTS) return;
+
+    // Lazy colour init for new slots
+    if (!_mpInitializedSlots.has(slot)) {
+      _mpInitializedSlots.add(slot);
+    }
+
+    let segs;
+    try { segs = JSON.parse(ps.segmentsJson || '[]'); } catch (_e) { segs = []; }
+    if (segs.length === 0) segs = [{ x: ps.x, z: ps.z }];
+
+    const dirAngle = ps.angle;
+    serpentManager.applyNetworkState(
+      slot,
+      ps.x, ps.z,
+      Math.sin(dirAngle), Math.cos(dirAngle),
+      segs,
+      ps.alive, ps.boosting, ps.colorIdx
+    );
+
+    // Track our own serpent
+    if (sessionId === networkManager.mySessionId) {
+      serpentManager.playerSerpent = serpentManager.serpents[slot];
+    }
+  });
+
+  // Hide serpent slots not used by this room
+  for (let i = MP_SLOTS; i < TOTAL_SERPENTS; i++) {
+    if (serpentManager.serpents[i]) {
+      serpentManager.serpents[i].alive = false;
+      serpentManager.headMeshes[i].visible = false;
+      serpentManager.headLights[i].visible = false;
+    }
+  }
+
+  // Orbs from server
+  const orbList = [];
+  ns.orbs.forEach((o) => {
+    orbList.push({ x: o.x, z: o.z, active: o.active, type: o.orbType, color: o.color });
+  });
+  orbManager.applyNetworkOrbs(orbList);
+}
+
+/**
+ * Start an MP match: connect → wait for server countdown → play.
+ */
+async function startMultiplayerGame() {
+  const mpBtn = document.getElementById('mp-btn');
+  if (mpBtn) { mpBtn.disabled = true; mpBtn.textContent = 'CONNECTING…'; }
+
+  try {
+    networkManager = new NetworkManager();
+
+    // Kill feed from server
+    networkManager.onKill((data) => {
+      const vc = data.victimSlot  != null ? SERPENT_COLORS[data.victimSlot  % SERPENT_COLORS.length] : 0xffffff;
+      const kc = data.killerSlot != null ? SERPENT_COLORS[data.killerSlot % SERPENT_COLORS.length] : 0xffffff;
+      addKillFeed(data.killerName, data.victimName, kc, vc);
+      if (data.killerSlot === networkManager.mySlot) {
+        playerStats.kills++;
+        Audio.kill();
+      }
+    });
+
+    // Game-over from server
+    networkManager.onGameOver((data) => {
+      const mySlot = networkManager.mySlot;
+      const isWin = (data.winnerSlot === mySlot);
+      if (isWin) {
+        showAliveBanner('YOU WIN!');
+        Audio.victory();
+        Audio.slitherStop();
+      }
+      gameState = STATE.DEAD;
+      playerStats.timeSurvived = matchTime;
+      setTimeout(() => {
+        showResults(isWin, { ...playerStats, total: MP_SLOTS });
+        gameState = STATE.GAMEOVER;
+      }, 2500);
+    });
+
+    await networkManager.connect('PLAYER', 0);
+
+    if (!systemsReady) initSystems();
+
+    // Spawn all serpent slots (MP uses first 8)
+    serpentManager.spawnSerpents(networkManager.mySlot ?? 0);
+    // Hide unused slots
+    for (let i = MP_SLOTS; i < TOTAL_SERPENTS; i++) {
+      serpentManager.serpents[i].alive = false;
+      serpentManager.headMeshes[i].visible = false;
+      serpentManager.headLights[i].visible = false;
+    }
+
+    playerStats = { kills: 0, maxLength: 5, placement: MP_SLOTS, timeSurvived: 0 };
+    prevAliveCount = MP_SLOTS;
+    matchTime = 0;
+    damageFlash = 0;
+    zoneWarnCooldown = 0;
+    playerOutsideZone = false;
+    inputDirX = 0; inputDirZ = -1;
+    _mpInitializedSlots.clear();
+
+    showStartScreen(false);
+    showHUD(true);
+    Audio.init();
+
+    // Wait for server countdown before setting PLAYING
+    gameState = STATE.COUNTDOWN;
+    countdownStep = 3;
+    showCountdown(3);
+
+    startTickLoop();
+
+  } catch (err) {
+    console.error('[MP] Connection failed:', err);
+    if (mpBtn) { mpBtn.disabled = false; mpBtn.textContent = 'MULTIPLAYER'; }
+    alert('Could not connect to multiplayer server.\nMake sure the server is running on port 2567.');
+  }
+}
+
 // ─── Main Loop ────────────────────────────────────────────────────────────────
 
 let lastTime = performance.now();
-// BUG 4 fix: guard against starting multiple tick loops
 let tickLoopRunning = false;
 
 function tick(now) {
@@ -295,10 +434,20 @@ function tick(now) {
   lastTime = now;
   globalTime += dt;
 
-  if (gameState === STATE.COUNTDOWN) {
-    updateCountdown(dt);
-  } else if (gameState === STATE.PLAYING || gameState === STATE.DEAD) {
-    updateGame(dt);
+  if (gameMode === 'sp') {
+    // ── Single-player ────────────────────────────────────────────────────────
+    if (gameState === STATE.COUNTDOWN) {
+      updateCountdown(dt);
+    } else if (gameState === STATE.PLAYING || gameState === STATE.DEAD) {
+      updateGame(dt);
+    }
+  } else {
+    // ── Multiplayer ──────────────────────────────────────────────────────────
+    if (gameState === STATE.COUNTDOWN) {
+      updateCountdownMP(dt);
+    } else if (gameState === STATE.PLAYING || gameState === STATE.DEAD) {
+      updateGameMP(dt);
+    }
   }
 
   terrain?.update(globalTime);
@@ -311,12 +460,13 @@ function tick(now) {
 }
 
 function startTickLoop() {
-  // BUG 4 fix: only start one tick loop
   if (tickLoopRunning) return;
   tickLoopRunning = true;
   lastTime = performance.now();
   requestAnimationFrame(tick);
 }
+
+// ─── SP countdown / game ─────────────────────────────────────────────────────
 
 function updateCountdown(dt) {
   countdownTimer += dt;
@@ -340,7 +490,6 @@ function updateGame(dt) {
   const player = serpentManager.playerSerpent;
   const boostActive = isBoosting || keys['KeyW'] || keys['ArrowUp'];
 
-  // ── Update serpents ──
   if (player && player.alive) {
     const playerDrops = serpentManager.updatePlayer(dt, inputDirX, inputDirZ, boostActive);
     for (const d of playerDrops) orbManager.spawnBoostOrb(d.x, d.z);
@@ -349,26 +498,24 @@ function updateGame(dt) {
   const botDrops = serpentManager.updateBots(dt, orbManager, zoneManager);
   for (const d of botDrops) orbManager.spawnBoostOrb(d.x, d.z);
 
-  // ── Circular boundary kill ──
+  // Circular boundary kill
   for (const s of serpentManager.serpents) {
     if (!s.alive) continue;
     const r2 = s.headPos.x * s.headPos.x + s.headPos.z * s.headPos.z;
-    if (r2 > ARENA_RADIUS * ARENA_RADIUS) {
-      handleDeath(s, null);
-    }
+    if (r2 > ARENA_RADIUS * ARENA_RADIUS) handleDeath(s, null);
   }
 
-  // ── Orb collection ──
+  // Orb collection
   const orbEvents = orbManager.checkCollection(serpentManager.serpents);
   for (const ev of orbEvents) {
     serpentManager.growSerpent(ev.serpent, ev.mass || 1);
     if (ev.serpent.isPlayer) Audio.orbPickup();
   }
 
-  // ── Zone update ──
+  // Zone update
   zoneManager.update(dt);
 
-  // ── Zone damage ──
+  // Zone damage
   zoneWarnCooldown -= dt;
   playerOutsideZone = false;
   for (const s of serpentManager.serpents) {
@@ -385,24 +532,22 @@ function updateGame(dt) {
       }
       if (died) handleDeath(s, null);
     } else {
-      // BUG 2 fix: reset zone damage timer for ALL alive serpents inside the zone
       s.zoneDamageTimer = 0;
     }
   }
 
-  // BUG 1 fix: build segment caches for all alive serpents BEFORE collision detection
+  // Build segment caches for collision
   for (const s of serpentManager.serpents) {
     if (s.alive) s.path.buildSegmentCache(s.segmentCount);
   }
 
-  // ── Collision detection ──
+  // Collision detection
   if (gameState === STATE.PLAYING) {
     const kills = collisionSystem.checkHeadBody(serpentManager.serpents);
     for (const { victim, killer } of kills) {
       if (!victim.alive) continue;
       handleDeath(victim, killer);
     }
-    // Head-to-head: both snakes die
     const headKills = collisionSystem.checkHeadHead(serpentManager.serpents);
     for (const { victim, killer } of headKills) {
       if (!victim.alive) continue;
@@ -410,29 +555,126 @@ function updateGame(dt) {
     }
   }
 
-  // ── Win check ──
   if (gameState === STATE.PLAYING) checkWinCondition();
 
-  // ── Render ──
   serpentManager.render();
   orbManager.update(globalTime, serpentManager.serpents);
-
-  // ── Camera — always update (handles dead/orbit mode internally) ──
   cameraController.update(player, dt);
 
-  // ── Damage flash fade — slower when outside zone (more threatening) ──
   damageFlash *= playerOutsideZone ? 0.97 : 0.90;
   showDamageOverlay(damageFlash);
 
-  // ── Slither ambient sound ──
-  if (player && player.alive) {
-    Audio.slitherUpdate(player.boosting || boostActive);
-  }
+  if (player && player.alive) Audio.slitherUpdate(player.boosting || boostActive);
 
-  // ── HUD ──
   updateHUD(serpentManager, zoneManager, matchTime);
   updateMinimap(serpentManager, zoneManager);
   updateLeaderboard(serpentManager);
+}
+
+// ─── MP countdown / game ─────────────────────────────────────────────────────
+
+function updateCountdownMP(dt) {
+  const ns = networkManager?.state;
+  if (!ns) return;
+
+  if (ns.phase === 'playing') {
+    // Server says go
+    showCountdown(null);
+    showHUD(true);
+    Audio.go();
+    Audio.slitherStart();
+    gameState = STATE.PLAYING;
+    return;
+  }
+
+  if (ns.phase === 'countdown') {
+    const step = Math.ceil(ns.countdownTimer);
+    if (step !== countdownStep && step > 0) {
+      countdownStep = step;
+      showCountdown(step);
+      Audio.countdown();
+    }
+  }
+}
+
+function updateGameMP(dt) {
+  matchTime += dt;
+
+  if (!networkManager?.isConnected) return;
+
+  // Send input to server
+  updateMouseDirection();
+  const boostActive = isBoosting || keys['KeyW'] || keys['ArrowUp'];
+  const inputAngle = Math.atan2(inputDirX, inputDirZ);
+  networkManager.sendInput(inputAngle, boostActive);
+
+  // Apply server state
+  applyNetworkStateToScene();
+
+  // Detect player death from server state
+  const ns = networkManager.state;
+  const mySlot = networkManager.mySlot;
+  if (mySlot >= 0 && ns && gameState === STATE.PLAYING) {
+    const myPs = ns.players.get(networkManager.mySessionId);
+    if (myPs && !myPs.alive) {
+      gameState = STATE.DEAD;
+      Audio.death();
+      Audio.slitherStop();
+      damageFlash = 1.0;
+      playerStats.placement = (ns.aliveCount ?? 0) + 1;
+      if (serpentManager.playerSerpent) {
+        cameraController.setDeathMode(serpentManager.playerSerpent.headPos.x, serpentManager.playerSerpent.headPos.z);
+        playerStats.maxLength = Math.max(playerStats.maxLength, serpentManager.playerSerpent.segmentCount);
+      }
+      playerStats.timeSurvived = matchTime;
+      setTimeout(() => {
+        showResults(false, { ...playerStats, total: MP_SLOTS });
+        gameState = STATE.GAMEOVER;
+      }, 2000);
+    }
+  }
+
+  // Track player length for HUD
+  if (serpentManager.playerSerpent) {
+    playerStats.maxLength = Math.max(playerStats.maxLength, serpentManager.playerSerpent.segmentCount);
+  }
+
+  // Zone damage flash for player
+  playerOutsideZone = false;
+  if (ns && serpentManager.playerSerpent?.alive) {
+    const p = serpentManager.playerSerpent;
+    if (!zoneManager.isInZone(p.headPos.x, p.headPos.z)) {
+      playerOutsideZone = true;
+      damageFlash = Math.min(1, damageFlash + dt * 1.5);
+      zoneWarnCooldown -= dt;
+      if (zoneWarnCooldown <= 0) {
+        Audio.zoneWarning();
+        zoneWarnCooldown = 3.5;
+      }
+    }
+  }
+
+  // Render
+  serpentManager.render();
+  orbManager.update(globalTime, serpentManager.serpents);
+  cameraController.update(serpentManager.playerSerpent, dt);
+
+  damageFlash *= playerOutsideZone ? 0.97 : 0.90;
+  showDamageOverlay(damageFlash);
+
+  if (serpentManager.playerSerpent?.alive) {
+    Audio.slitherUpdate(serpentManager.playerSerpent.boosting || boostActive);
+  }
+
+  // HUD — wrap serpentManager so aliveCount comes from server
+  if (ns) {
+    const fakeManager = Object.create(serpentManager);
+    fakeManager.serpents = serpentManager.serpents;
+    Object.defineProperty(fakeManager, 'aliveCount', { get: () => ns.aliveCount, configurable: true });
+    updateHUD(fakeManager, zoneManager, matchTime);
+    updateMinimap(fakeManager, zoneManager);
+    updateLeaderboard(fakeManager);
+  }
 }
 
 // ─── Resize ───────────────────────────────────────────────────────────────────
@@ -447,17 +689,29 @@ window.addEventListener('resize', () => {
 // ─── Buttons ─────────────────────────────────────────────────────────────────
 
 document.getElementById('play-btn')?.addEventListener('click', () => {
+  gameMode = 'sp';
   if (!systemsReady) initSystems();
   startGame();
-  startTickLoop(); // BUG 4 fix: guarded start
+  startTickLoop();
 }, { once: true });
+
+document.getElementById('mp-btn')?.addEventListener('click', () => {
+  gameMode = 'mp';
+  startMultiplayerGame();
+});
 
 document.getElementById('play-again-btn')?.addEventListener('click', () => {
   document.getElementById('results-screen').style.display = 'none';
   showHUD(false);
+  if (gameMode === 'mp' && networkManager) {
+    networkManager.leave();
+    networkManager = null;
+  }
+  tickLoopRunning = false; // allow new tick loop
   resetSystems();
+  gameMode = 'sp';
   startGame();
-  startTickLoop(); // BUG 4 fix: ensures loop running, guard prevents double-start
+  startTickLoop();
 });
 
 // ─── Initial Load ─────────────────────────────────────────────────────────────
@@ -466,7 +720,6 @@ initSystems();
 showStartScreen(true);
 showHUD(false);
 
-// Idle render (just the scene, no game logic)
 function idleLoop(now) {
   if (gameState !== STATE.START) return;
   requestAnimationFrame(idleLoop);

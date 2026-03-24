@@ -43,6 +43,8 @@ class SerpentPath {
     this.segmentSpacing = SEGMENT_SPACING;
     this._distSinceLastPoint = 0;
     this.segmentPositions = []; // cache, updated each frame
+    // In multiplayer mode, positions come from the server — skip local rebuild
+    this._networkMode = false;
 
     // Seed initial path
     for (let i = 0; i < 60; i++) {
@@ -580,6 +582,51 @@ export class SerpentManager {
     return this.serpents.filter(s => s.alive).length;
   }
 
+  /**
+   * Inject server-authoritative state for a specific serpent slot.
+   * Used in multiplayer mode — bypasses local physics/AI.
+   */
+  applyNetworkState(slotIndex, headX, headZ, dirX, dirZ, segments, alive, boosting, colorIdx) {
+    const s = this.serpents[slotIndex];
+    if (!s) return;
+
+    s.alive    = alive;
+    s.boosting = boosting;
+    s.headPos.x = headX;
+    s.headPos.z = headZ;
+    s.headDir.x = dirX ?? 0;
+    s.headDir.z = dirZ ?? 1;
+    s.path.headPos.x = headX;
+    s.path.headPos.z = headZ;
+    s.path.headDir.x = dirX ?? 0;
+    s.path.headDir.z = dirZ ?? 1;
+    s.path._networkMode = true; // skip buildSegmentCache in render()
+
+    const count = segments.length;
+    s.segmentCount = count;
+
+    // Resize / fill segmentPositions
+    if (s.path.segmentPositions.length !== count) {
+      s.path.segmentPositions.length = count;
+      for (let i = 0; i < count; i++) {
+        if (!s.path.segmentPositions[i]) s.path.segmentPositions[i] = { x: 0, z: 0 };
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      s.path.segmentPositions[i].x = segments[i].x;
+      s.path.segmentPositions[i].z = segments[i].z;
+    }
+
+    // Sync color
+    const col = SERPENT_COLORS[colorIdx % SERPENT_COLORS.length];
+    s.color.setHex(col);
+    this.headMeshes[slotIndex].material.color.setHex(col);
+    this.headMeshes[slotIndex].material.emissive.setHex(col);
+    this.headLights[slotIndex].color.setHex(col);
+    this.headMeshes[slotIndex].visible = alive;
+    this.headLights[slotIndex].visible = alive;
+  }
+
   // Update all InstancedMesh and head meshes
   render() {
     const dummy = this._dummy;
@@ -588,8 +635,8 @@ export class SerpentManager {
     for (const s of this.serpents) {
       if (!s.alive) continue;
 
-      // Build segment cache
-      s.path.buildSegmentCache(s.segmentCount);
+      // In network mode, segmentPositions are already set by applyNetworkState()
+      if (!s.path._networkMode) s.path.buildSegmentCache(s.segmentCount);
       const segs = s.path.segmentPositions;
 
       // Update head mesh
